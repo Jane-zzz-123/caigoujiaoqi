@@ -39,7 +39,7 @@ df = load_data()
 
 # -------------------------- 筛选器 --------------------------
 year_month_list = sorted(df["到货年月"].dropna().unique())
-selected_month = st.selectbox("📅 选择到货年月", year_month_list)
+selected_month = st.selectbox("📅 选择到货年月", year_month_list, index=len(year_month_list)-1)
 df_current = df[df["到货年月"] == selected_month].copy()
 
 
@@ -59,18 +59,10 @@ df_last = df[df["到货年月"] == last_month].copy() if last_month else pd.Data
 st.markdown("---")
 
 # -------------------------- 指标卡片（完全按行数统计，不去重） --------------------------
+# -------------------------- 指标卡片（自定义样式，和截图效果一致） --------------------------
 st.subheader(f"📆 {selected_month} 月度整体分析")
 
-# ✅ 完全按你的口径：全部按行数，不去重！
-current_po = len(df_current)  # 总行数 = PO单数
-current_on_time = len(df_current[df_current["交期状态"].isin(["提前", "准时"])])
-current_overdue = len(df_current[df_current["交期状态"] == "逾期"])
-current_total = current_po
-
-current_on_time_rate = current_on_time / current_total * 100 if current_total > 0 else 0
-current_diff_avg = df_current["预计-实际交期的差值"].mean()
-
-# 上月同样按行数
+# 计算上月数据
 last_po = len(df_last) if not df_last.empty else 0
 last_on_time = len(df_last[df_last["交期状态"].isin(["提前", "准时"])]) if not df_last.empty else 0
 last_overdue = len(df_last[df_last["交期状态"] == "逾期"]) if not df_last.empty else 0
@@ -78,20 +70,68 @@ last_total = last_po
 last_on_time_rate = last_on_time / last_total * 100 if last_total > 0 else 0
 last_diff_avg = df_last["预计-实际交期的差值"].mean() if not df_last.empty else 0
 
+# 当前月数据
+current_po = len(df_current)
+current_on_time = len(df_current[df_current["交期状态"].isin(["提前", "准时"])])
+current_overdue = len(df_current[df_current["交期状态"] == "逾期"])
+current_total = current_po
+current_on_time_rate = current_on_time / current_total * 100 if current_total > 0 else 0
+current_diff_avg = df_current["预计-实际交期的差值"].mean() if not pd.isna(
+    df_current["预计-实际交期的差值"].mean()) else 0
+
+
+# 自定义卡片样式函数
+def styled_metric(col, label, value, current_val, last_val, suffix="", positive_color="green", negative_color="red"):
+    # 计算环比变化
+    delta = current_val - last_val
+    delta_text = f"{delta:+}（上月: {last_val}{suffix}）" if last_val != 0 else "无上月数据"
+
+    # 颜色逻辑：增长/下降对应不同颜色
+    if delta > 0:
+        color = positive_color
+    elif delta < 0:
+        color = negative_color
+    else:
+        color = "gray"
+
+    # 用HTML+CSS自定义卡片样式
+    with col:
+        st.markdown(f"""
+        <div style="
+            background-color: #f9f9f9;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            border: 1px solid #eee;
+        ">
+            <div style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 10px;">{label}</div>
+            <div style="font-size: 32px; font-weight: bold; color: #111; margin-bottom: 8px;">{value}{suffix}</div>
+            <div style="font-size: 14px; color: {color};">{delta_text}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# 布局卡片
 col1, col2, col3, col4, col5 = st.columns(5)
+
 with col1:
-    st.metric("PO单数（行数）", current_po, f"{current_po - last_po}")
+    styled_metric(col1, "PO单数", current_po, current_po, last_po, positive_color="red", negative_color="green")
+
 with col2:
-    st.metric("提前/准时订单", current_on_time, f"{current_on_time - last_on_time}")
+    styled_metric(col2, "提前/准时订单", current_on_time, current_on_time, last_on_time, positive_color="green",
+                  negative_color="red")
+
 with col3:
-    st.metric("逾期订单", current_overdue, f"{current_overdue - last_overdue}")
+    styled_metric(col3, "逾期订单", current_overdue, current_overdue, last_overdue, positive_color="red",
+                  negative_color="green")
+
 with col4:
-    delta_rate = round(current_on_time_rate - last_on_time_rate, 1)
-    st.metric("准时率(%)", round(current_on_time_rate, 1), f"{delta_rate}%")
+    styled_metric(col4, "准时率", f"{current_on_time_rate:.1f}%", current_on_time_rate, last_on_time_rate,
+                  positive_color="green", negative_color="red")
+
 with col5:
-    current_diff = round(current_diff_avg, 1) if not pd.isna(current_diff_avg) else 0
-    last_diff = round(last_diff_avg, 1) if (not pd.isna(last_diff_avg)) else 0
-    st.metric("平均交期差值(天)", current_diff, f"{current_diff - last_diff}")
+    styled_metric(col5, "平均交期差值(天)", f"{current_diff_avg:.1f}", current_diff_avg, last_diff_avg,
+                  positive_color="red", negative_color="green")
 
 st.markdown("---")
 
