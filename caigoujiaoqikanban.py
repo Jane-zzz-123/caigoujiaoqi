@@ -21,7 +21,7 @@ st.markdown("---")
 @st.cache_data(ttl=3600)  # 缓存数据，提升加载速度
 def load_data():
     # GitHub 原始文件下载链接
-    url = "https://github.com/Jane-zzz-123/streamlit-dashboard/raw/main/caigoushuju.xlsx"
+    url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
     response = requests.get(url)
     excel_file = BytesIO(response.content)
 
