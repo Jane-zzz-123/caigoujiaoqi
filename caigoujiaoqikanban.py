@@ -160,8 +160,16 @@ with c1:
             "状态": ["提前/准时", "逾期"],
             "数量": [current_on_time, current_overdue]
         })
-        fig = px.pie(pie_data, values="数量", names="状态",
-                     color_discrete_map={"提前/准时":"#28a745","逾期":"#dc3545"}, hole=0.3)
+        fig = px.pie(
+            pie_data,
+            values="数量",
+            names="状态",
+            color="状态",
+            # 这里强制设置颜色：提前/准时用绿色，逾期用红色
+            color_discrete_map={"提前/准时": "#28a745", "逾期": "#dc3545"},
+            hole=0.3,
+            labels={"数量": "订单数"}
+        )
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
 
