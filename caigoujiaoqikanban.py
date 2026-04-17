@@ -230,15 +230,39 @@ if not df_current.empty:
 st.markdown("---")
 
 # -------------------------- 逾期分析 --------------------------
+# -------------------------- 逾期分析 --------------------------
 st.subheader("⚠️ 逾期厂家专项分析")
 overdue_df = df_current[df_current["交期状态"] == "逾期"]
 if overdue_df.empty:
     st.success("✅ 本月无逾期订单！")
 else:
-    analyze_df = overdue_df.groupby("厂家").agg(
-        逾期订单数=("采购单号", "count"),
-        平均逾期差值=("预计-实际交期的差值", "mean"),
-        涉及SKU数=("SKU", "nunique")
-    ).round(2).sort_values("逾期订单数", ascending=False).reset_index()
-    st.dataframe(analyze_df, use_container_width=True)
-    st.dataframe(overdue_df[table_cols], use_container_width=True)
+    # 按厂家汇总计算
+    analyze_df = df_current.groupby("厂家").agg(
+        订单总数=("采购单号", "count"),
+        准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
+        逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
+        平均实际交期=("实际采购交期", "mean"),
+        最长实际交期=("实际采购交期", "max")
+    ).reset_index()
+
+    # 计算准时率、占比
+    analyze_df["准时率"] = (analyze_df["准时订单数"] / analyze_df["订单总数"] * 100).round(1)
+    analyze_df["订单占比"] = (analyze_df["订单总数"] / analyze_df["订单总数"].sum() * 100).round(1)
+    analyze_df = analyze_df.sort_values("订单总数", ascending=False).reset_index(drop=True)
+
+    # 一行四列展示卡片
+    cols = st.columns(4)
+    for idx, row in analyze_df.iterrows():
+        with cols[idx % 4]:
+            st.markdown(f"""
+            <div style="padding:16px; border-radius:12px; background:#fef2f2; border:1px solid #fecdd3;">
+                <div style="font-size:16px; font-weight:600; margin-bottom:8px;">{row['厂家']}</div>
+                <div style="font-size:14px; line-height:1.6;">
+                    准时率：{row['准时率']}%<br/>
+                    订单数：{row['订单总数']} 单（{row['订单占比']}%）<br/>
+                    准时：{row['准时订单数']} 单｜逾期：{row['逾期订单数']} 单<br/>
+                    平均交期：{row['平均实际交期']:.1f} 天<br/>
+                    最长交期：{row['最长实际交期']:.1f} 天
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
