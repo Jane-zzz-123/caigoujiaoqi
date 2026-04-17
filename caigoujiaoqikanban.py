@@ -13,7 +13,7 @@ st.markdown("---")
 # -------------------------- 加载数据 --------------------------
 @st.cache_data(ttl=3600)
 def load_data():
-    url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
+    url = "https://github.com/Jane-zzz-123/streamlit-dashboard/raw/main/caigoushuju.xlsx"
     response = requests.get(url)
     excel_file = BytesIO(response.content)
 
@@ -27,7 +27,8 @@ def load_data():
     df = df[need_cols]
     df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
 
-    df["到货年月"] = df["到货年月"].astype(str).str.strip()
+    # 统一日期格式为 YYYY-MM，确保2月数据正常显示
+    df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
     df["实际采购交期"] = pd.to_numeric(df["实际采购交期"], errors="coerce")
     df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
 
@@ -42,11 +43,12 @@ selected_month = st.selectbox("📅 选择到货年月", year_month_list)
 df_current = df[df["到货年月"] == selected_month].copy()
 
 
+# 获取上月
 def get_last_month(ym):
     try:
-        current_dt = datetime.strptime(ym, "%Y%m")
+        current_dt = datetime.strptime(ym, "%Y-%m")
         last_dt = current_dt - pd.DateOffset(months=1)
-        return last_dt.strftime("%Y%m")
+        return last_dt.strftime("%Y-%m")
     except:
         return None
 
@@ -56,30 +58,40 @@ df_last = df[df["到货年月"] == last_month].copy() if last_month else pd.Data
 
 st.markdown("---")
 
-# -------------------------- 指标卡片 --------------------------
+# -------------------------- 指标卡片（完全按行数统计，不去重） --------------------------
 st.subheader(f"📆 {selected_month} 月度整体分析")
 
-current_po = df_current["采购单号"].nunique()
-current_on_time = df_current[df_current["交期状态"].isin(["提前", "准时"])].shape[0]
-current_overdue = df_current[df_current["交期状态"] == "逾期"].shape[0]
-current_total = current_on_time + current_overdue
+# ✅ 完全按你的口径：全部按行数，不去重！
+current_po = len(df_current)  # 总行数 = PO单数
+current_on_time = len(df_current[df_current["交期状态"].isin(["提前", "准时"])])
+current_overdue = len(df_current[df_current["交期状态"] == "逾期"])
+current_total = current_po
+
 current_on_time_rate = current_on_time / current_total * 100 if current_total > 0 else 0
 current_diff_avg = df_current["预计-实际交期的差值"].mean()
 
-last_po = df_last["采购单号"].nunique() if not df_last.empty else 0
-last_on_time = df_last[df_last["交期状态"].isin(["提前", "准时"])].shape[0] if not df_last.empty else 0
-last_overdue = df_last[df_last["交期状态"] == "逾期"].shape[0] if not df_last.empty else 0
-last_on_time_rate = last_on_time / (last_on_time + last_overdue) * 100 if (last_on_time + last_overdue) > 0 else 0
+# 上月同样按行数
+last_po = len(df_last) if not df_last.empty else 0
+last_on_time = len(df_last[df_last["交期状态"].isin(["提前", "准时"])]) if not df_last.empty else 0
+last_overdue = len(df_last[df_last["交期状态"] == "逾期"]) if not df_last.empty else 0
+last_total = last_po
+last_on_time_rate = last_on_time / last_total * 100 if last_total > 0 else 0
 last_diff_avg = df_last["预计-实际交期的差值"].mean() if not df_last.empty else 0
 
 col1, col2, col3, col4, col5 = st.columns(5)
-with col1: st.metric("PO单数", current_po, f"{current_po - last_po}")
-with col2: st.metric("提前/准时订单", current_on_time, f"{current_on_time - last_on_time}")
-with col3: st.metric("逾期订单", current_overdue, f"{current_overdue - last_overdue}")
-with col4: st.metric("准时率(%)", round(current_on_time_rate, 1),
-                     f"{round(current_on_time_rate - last_on_time_rate, 1)}%")
-with col5: st.metric("平均交期差值(天)", round(current_diff_avg, 1) if current_diff_avg else 0,
-                     f"{round((current_diff_avg or 0) - (last_diff_avg or 0), 1)}")
+with col1:
+    st.metric("PO单数（行数）", current_po, f"{current_po - last_po}")
+with col2:
+    st.metric("提前/准时订单", current_on_time, f"{current_on_time - last_on_time}")
+with col3:
+    st.metric("逾期订单", current_overdue, f"{current_overdue - last_overdue}")
+with col4:
+    delta_rate = round(current_on_time_rate - last_on_time_rate, 1)
+    st.metric("准时率(%)", round(current_on_time_rate, 1), f"{delta_rate}%")
+with col5:
+    current_diff = round(current_diff_avg, 1) if not pd.isna(current_diff_avg) else 0
+    last_diff = round(last_diff_avg, 1) if (not pd.isna(last_diff_avg)) else 0
+    st.metric("平均交期差值(天)", current_diff, f"{current_diff - last_diff}")
 
 st.markdown("---")
 
@@ -103,9 +115,8 @@ else:
 
 st.markdown("---")
 
-# -------------------------- 图表（原生 streamlit 图表，无需 matplotlib） --------------------------
+# -------------------------- 图表 --------------------------
 st.subheader("📊 交期状态分析")
-
 c1, c2 = st.columns(2)
 with c1:
     st.markdown("#### 准时率占比")
@@ -114,7 +125,6 @@ with c1:
             "状态": ["提前/准时", "逾期"],
             "数量": [current_on_time, current_overdue]
         })
-        st.dataframe(pie_df, use_container_width=True)
         st.bar_chart(pie_df, x="状态", y="数量")
 
 with c2:
@@ -129,7 +139,7 @@ if not df_current["预计-实际交期的差值"].dropna().empty:
 
 st.markdown("---")
 
-# -------------------------- 交期明细表 --------------------------
+# -------------------------- 明细表 --------------------------
 st.subheader("📋 交期数据明细")
 table_cols = [
     "到货年月", "交期状态", "厂家", "下单时间", "采购单号", "品名", "SKU",
@@ -142,16 +152,16 @@ st.dataframe(df_table[table_cols], use_container_width=True, height=300)
 
 st.markdown("---")
 
-# -------------------------- 厂家统计表 --------------------------
-st.subheader("🏭 厂家交期统计汇总")
+# -------------------------- 厂家汇总 --------------------------
+st.subheader("🏭 各厂家交期统计汇总")
 if not df_current.empty:
     factory_df = df_current.groupby("厂家").agg(
-        PO单数=("采购单号", "nunique"),
+        PO单数=("采购单号", "count"),  # 按行数
         提前准时订单=("交期状态", lambda x: x.isin(["提前", "准时"]).sum()),
         逾期订单=("交期状态", lambda x: (x == "逾期").sum())
     ).reset_index()
 
-    factory_df["总订单"] = factory_df["提前准时订单"] + factory_df["逾期订单"]
+    factory_df["总订单"] = factory_df["PO单数"]
     factory_df["准时率(%)"] = (factory_df["提前准时订单"] / factory_df["总订单"] * 100).round(1)
     factory_df["逾期率(%)"] = (factory_df["逾期订单"] / factory_df["总订单"] * 100).round(1)
 
@@ -174,7 +184,7 @@ if overdue_df.empty:
     st.success("✅ 本月无逾期订单！")
 else:
     analyze_df = overdue_df.groupby("厂家").agg(
-        逾期订单数=("采购单号", "nunique"),
+        逾期订单数=("采购单号", "count"),
         平均逾期差值=("预计-实际交期的差值", "mean"),
         涉及SKU数=("SKU", "nunique")
     ).round(1).sort_values("逾期订单数", ascending=False).reset_index()
@@ -182,4 +192,4 @@ else:
     st.dataframe(overdue_df[table_cols], use_container_width=True)
 
 st.markdown("---")
-st.success("✅ 看板加载完成！")
+st.success("✅ 看板已按【按行数统计】口径修复完成！")
