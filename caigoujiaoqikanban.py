@@ -10,30 +10,37 @@ st.set_page_config(page_title="采购交期监控看板", page_icon="📊", layo
 st.title("📦 采购交期监控可视化看板")
 st.markdown("---")
 
-# -------------------------- 加载数据 --------------------------
+# -------------------------- 加载数据（已修复） --------------------------
 @st.cache_data(ttl=3600)
 def load_data():
-    url = "https://github.com/Jane-zzz/caigoujiaoqi/raw/main/caigoushuju.xlsx"
-    response = requests.get(url)
-    excel_file = BytesIO(response.content)
+    try:
+        url = "https://github.com/Jane-zzz/caigoujiaoqi/raw/main/caigoushuju.xlsx"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        excel_file = BytesIO(response.content)
 
-    df = pd.read_excel(excel_file, sheet_name="源数据")
+        df = pd.read_excel(excel_file, sheet_name="源数据")
 
-    need_cols = [
-        "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "待到货量",
-        "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家",
-        "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值"
-    ]
-    df = df[need_cols]
-    df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
+        need_cols = [
+            "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "待到货量",
+            "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家",
+            "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值"
+        ]
+        df = df[need_cols]
+        df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
 
-    df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
-    df["实际采购交期"] = pd.to_numeric(df["实际采购交期"], errors="coerce")
-    df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
+        df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
+        df["实际采购交期"] = pd.to_numeric(df["实际采购交期"], errors="coerce")
+        df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
 
-    return df
+        return df
+    except Exception as e:
+        st.error(f"数据加载失败：{str(e)}")
+        return pd.DataFrame()
 
 df = load_data()
+if df.empty:
+    st.stop()
 
 # -------------------------- 筛选器：年月 + 厂家 --------------------------
 col1, col2 = st.columns(2)
