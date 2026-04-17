@@ -10,11 +10,10 @@ st.set_page_config(page_title="采购交期监控看板", page_icon="📊", layo
 st.title("📦 采购交期监控可视化看板")
 st.markdown("---")
 
-
 # -------------------------- 加载数据 --------------------------
 @st.cache_data(ttl=3600)
 def load_data():
-    url = "https://github.com/Jane-zzz-123/streamlit-dashboard/raw/main/caigoushuju.xlsx"
+    url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
     response = requests.get(url)
     excel_file = BytesIO(response.content)
 
@@ -34,14 +33,12 @@ def load_data():
 
     return df
 
-
 df = load_data()
 
 # -------------------------- 筛选器：默认最新月份 --------------------------
 year_month_list = sorted(df["到货年月"].dropna().unique())
 selected_month = st.selectbox("📅 选择到货年月", year_month_list, index=len(year_month_list) - 1)
 df_current = df[df["到货年月"] == selected_month].copy()
-
 
 # 获取上月
 def get_last_month(ym):
@@ -51,7 +48,6 @@ def get_last_month(ym):
         return last_dt.strftime("%Y-%m")
     except:
         return None
-
 
 last_month = get_last_month(selected_month)
 df_last = df[df["到货年月"] == last_month].copy() if last_month else pd.DataFrame()
@@ -71,9 +67,8 @@ last_overdue = len(df_last[df_last["交期状态"] == "逾期"]) if not df_last.
 last_on_time_rate = (last_on_time / last_total * 100) if last_total > 0 else 0.0
 last_diff_avg = df_last["预计-实际交期的差值"].mean() if (not df_last.empty and last_total > 0) else 0.0
 
-
-# -------------------------- 美观卡片 --------------------------
-def card(col, title, current, last, suffix="", is_good_up=True):
+# -------------------------- 美观卡片（新增背景色参数） --------------------------
+def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbfc", is_int=False):
     if last == 0:
         pct = "新数据"
     else:
@@ -85,24 +80,33 @@ def card(col, title, current, last, suffix="", is_good_up=True):
     else:
         color = "#dc3545" if current >= last else "#28a745"
 
+    # 整数格式（无小数点） vs 浮点数格式（保留2位）
+    if is_int:
+        current_str = f"{int(current)}"
+        last_str = f"{int(last)}"
+    else:
+        current_str = f"{current:.2f}"
+        last_str = f"{last:.2f}"
+
     with col:
         st.markdown(f"""
-        <div style="padding:18px; border-radius:12px; background:#fafbfc; border:1px solid #e5e7eb;">
+        <div style="padding:18px; border-radius:12px; background:{bg_color}; border:1px solid #e5e7eb;">
           <div style="font-size:15px; color:#555; margin-bottom:8px;">{title}</div>
-          <div style="font-size:30px; font-weight:600;">{current:.2f}{suffix}</div>
+          <div style="font-size:30px; font-weight:600;">{current_str}{suffix}</div>
           <div style="font-size:13px; color:{color}; margin-top:6px;">
-            环比 {pct}（上月：{last:.2f}）
+            环比 {pct}（上月：{last_str}{suffix}）
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-
 st.subheader(f"📆 {selected_month} 整体分析")
 col1, col2, col3, col4, col5 = st.columns(5)
-card(col1, "PO单数", current_total, last_total, "", is_good_up=False)
-card(col2, "提前/准时", current_on_time, last_on_time, "", is_good_up=True)
-card(col3, "逾期", current_overdue, last_overdue, "", is_good_up=False)
-card(col4, "准时率", current_on_time_rate, last_on_time_rate, "%", is_good_up=True)
+
+# -------------------------- 关键修复：计数卡片启用整数模式 --------------------------
+card(col1, "PO单数", current_total, last_total, "", is_good_up=False, is_int=True)
+card(col2, "提前/准时", current_on_time, last_on_time, "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
+card(col3, "逾期", current_overdue, last_overdue, "", is_good_up=False, bg_color="#fef2f2", is_int=True)
+card(col4, "准时率", current_on_time_rate, last_on_time_rate, "%", is_good_up=True, bg_color="#eff6ff")
 card(col5, "平均交期差值", current_diff_avg, last_diff_avg, "天", is_good_up=False)
 
 st.markdown("---")
@@ -127,14 +131,13 @@ else:
 
 st.markdown("---")
 
-# -------------------------- ✨ 交期分析（和你参考图1:1还原） --------------------------
+# -------------------------- ✨ 交期分析 --------------------------
 st.subheader("📊 准时率与时效偏差分布")
 c1, c2 = st.columns(2)
 
 with c1:
     st.markdown(f"#### {selected_month} 准时率分布")
     if current_total > 0:
-        # 真正的饼图，绿/红两色，带百分比标签
         pie_data = pd.DataFrame({
             "状态": ["提前/准时", "逾期"],
             "数量": [current_on_time, current_overdue]
@@ -154,23 +157,18 @@ with c1:
 with c2:
     st.markdown("#### 交期差值区间分布")
     if current_total > 0:
-        # 处理差值数据，取整数并统计
         df_diff = df_current.copy()
         df_diff["差值(天)"] = df_diff["预计-实际交期的差值"].round(0).astype(int)
         diff_counts = df_diff["差值(天)"].value_counts().sort_index(ascending=False)
 
-        # 分提前/准时和延迟
         on_time_diff = diff_counts[diff_counts.index >= 0]
         overdue_diff = diff_counts[diff_counts.index < 0]
 
-        # 提前/准时部分
         st.markdown("✅ **提前/准时区间分布**")
         for day, cnt in on_time_diff.items():
-            # 用绿色方块模拟条形，和参考图效果一致
             bar = "🟩" * min(cnt, 20)
             st.markdown(f"- +{day}天: {bar} ({cnt}单)")
 
-        # 延迟部分
         st.markdown("❌ **延迟区间分布**")
         for day, cnt in overdue_diff.items():
             bar = "🟥" * min(cnt, 20)
@@ -229,6 +227,3 @@ else:
     ).round(2).sort_values("逾期订单数", ascending=False).reset_index()
     st.dataframe(analyze_df, use_container_width=True)
     st.dataframe(overdue_df[table_cols], use_container_width=True)
-
-st.markdown("---")
-st.success("✅ 看板已按参考图效果1:1还原！")
