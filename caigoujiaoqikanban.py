@@ -228,56 +228,50 @@ if not df_current.empty:
     st.dataframe(final, use_container_width=True, height=300)
 
 st.markdown("---")
-# -------------------------- 厂家订单数+准时率 组合图 --------------------------
+# -------------------------- 厂家订单数+准时率 组合分析 --------------------------
 st.subheader("📊 厂家订单数 & 准时率 组合分析")
 if not df_current.empty:
-    # 1. 按厂家汇总计算
     factory_chart = df_current.groupby("厂家").agg(
-        订单数=("采购单号", "count"),
-        准时订单数=("交期状态", lambda x: (x == "提前/准时").sum())
+        订单数=("采购单号","count"),
+        准时订单数=("交期状态",lambda x: (x=="提前/准时").sum())
     ).reset_index()
+    factory_chart["准时率(%)"] = (factory_chart["准时订单数"]/factory_chart["订单数"]*100).round(1)
+    factory_chart = factory_chart.sort_values("订单数", ascending=False)
 
-    factory_chart["准时率(%)"] = (factory_chart["准时订单数"] / factory_chart["订单数"] * 100).round(1)
-    factory_chart = factory_chart.sort_values("订单数", ascending=False)  # 按订单数从大到小
-
-    # 2. 画组合图
     import plotly.graph_objects as go
     fig = go.Figure()
 
-    # 柱状图：订单数
-    fig.add_trace(
-        go.Bar(
-            x=factory_chart["厂家"],
-            y=factory_chart["订单数"],
-            name="订单数",
-            marker_color="#5dade2",
-            opacity=0.8
-        )
-    )
+    # 柱状图 + 显示订单数
+    fig.add_trace(go.Bar(
+        x=factory_chart["厂家"],
+        y=factory_chart["订单数"],
+        name="订单数",
+        marker_color="#5dade2",
+        text=factory_chart["订单数"],  # 显示数值
+        textposition="outside",        # 显示在柱子顶部
+        textfont=dict(size=12)
+    ))
 
-    # 折线图：准时率
-    fig.add_trace(
-        go.Scatter(
-            x=factory_chart["厂家"],
-            y=factory_chart["准时率(%)"],
-            name="准时率(%)",
-            mode="lines+markers",
-            marker_color="#e74c3c",
-            line=dict(width=3),
-            yaxis="y2"
-        )
-    )
+    # 折线图 + 显示准时率
+    fig.add_trace(go.Scatter(
+        x=factory_chart["厂家"],
+        y=factory_chart["准时率(%)"],
+        name="准时率(%)",
+        mode="lines+markers+text",     #  lines + 点 + 文字
+        text=factory_chart["准时率(%)"].astype(str)+"%",  # 显示百分比
+        textposition="top center",
+        marker=dict(size=8, color="#e74c3c"),
+        line=dict(width=3),
+        yaxis="y2"
+    ))
 
-    # 双Y轴设置
     fig.update_layout(
         xaxis_title="厂家",
         yaxis=dict(title="订单数", side="left"),
-        yaxis2=dict(title="准时率(%)", overlaying="y", side="right", range=[0, 100]),
-        height=450,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5),
-        margin=dict(l=20, r=20, t=50, b=80)
+        yaxis2=dict(title="准时率(%)", overlaying="y", side="right", range=[0,100]),
+        height=480,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
