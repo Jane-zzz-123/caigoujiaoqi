@@ -10,12 +10,13 @@ st.set_page_config(page_title="采购交期监控看板", page_icon="📊", layo
 st.title("📦 采购交期监控可视化看板")
 st.markdown("---")
 
-# -------------------------- 加载数据（已修复） --------------------------
+# -------------------------- 加载数据（已修复正确链接） --------------------------
 @st.cache_data(ttl=3600)
 def load_data():
     try:
-        url = "https://github.com/Jane-zzz/caigoujiaoqi/raw/main/caigoushuju.xlsx"
-        response = requests.get(url, timeout=10)
+        # ✅ 正确的 raw 链接
+        url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
+        response = requests.get(url, timeout=15)
         response.raise_for_status()
         excel_file = BytesIO(response.content)
 
