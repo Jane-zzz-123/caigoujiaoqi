@@ -13,7 +13,7 @@ st.markdown("---")
 # -------------------------- 加载数据 --------------------------
 @st.cache_data(ttl=3600)
 def load_data():
-    url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
+    url = "https://github.com/Jane-zzz/caigoujiaoqi/raw/main/caigoushuju.xlsx"
     response = requests.get(url)
     excel_file = BytesIO(response.content)
 
@@ -35,12 +35,22 @@ def load_data():
 
 df = load_data()
 
-# -------------------------- 筛选器：默认最新月份 --------------------------
-year_month_list = sorted(df["到货年月"].dropna().unique())
-selected_month = st.selectbox("📅 选择到货年月", year_month_list, index=len(year_month_list) - 1)
-df_current = df[df["到货年月"] == selected_month].copy()
+# -------------------------- 筛选器：年月 + 厂家 --------------------------
+col1, col2 = st.columns(2)
+with col1:
+    year_month_list = sorted(df["到货年月"].dropna().unique())
+    selected_month = st.selectbox("📅 选择到货年月", year_month_list, index=len(year_month_list)-1)
 
-# 获取上月
+with col2:
+    factory_list = sorted(df["厂家"].dropna().unique())
+    selected_factory = st.multiselect("🏭 筛选厂家（默认全部）", factory_list, default=[])
+
+# 应用筛选
+df_current = df[df["到货年月"] == selected_month].copy()
+if selected_factory:
+    df_current = df_current[df_current["厂家"].isin(selected_factory)]
+
+# -------------------------- 上月数据 --------------------------
 def get_last_month(ym):
     try:
         current_dt = datetime.strptime(ym, "%Y-%m")
@@ -51,6 +61,8 @@ def get_last_month(ym):
 
 last_month = get_last_month(selected_month)
 df_last = df[df["到货年月"] == last_month].copy() if last_month else pd.DataFrame()
+if selected_factory and not df_last.empty:
+    df_last = df_last[df_last["厂家"].isin(selected_factory)]
 
 st.markdown("---")
 
@@ -67,7 +79,7 @@ last_overdue = len(df_last[df_last["交期状态"] == "逾期"]) if not df_last.
 last_on_time_rate = (last_on_time / last_total * 100) if last_total > 0 else 0.0
 last_diff_avg = df_last["预计-实际交期的差值"].mean() if (not df_last.empty and last_total > 0) else 0.0
 
-# -------------------------- 美观卡片（新增背景色参数） --------------------------
+# -------------------------- 卡片组件 --------------------------
 def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbfc", is_int=False):
     if last == 0:
         pct = "新数据"
@@ -80,7 +92,6 @@ def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbf
     else:
         color = "#dc3545" if current >= last else "#28a745"
 
-    # 整数格式（无小数点） vs 浮点数格式（保留2位）
     if is_int:
         current_str = f"{int(current)}"
         last_str = f"{int(last)}"
@@ -102,7 +113,6 @@ def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbf
 st.subheader(f"📆 {selected_month} 整体分析")
 col1, col2, col3, col4, col5 = st.columns(5)
 
-# -------------------------- 关键修复：计数卡片启用整数模式 --------------------------
 card(col1, "PO单数", current_total, last_total, "", is_good_up=False, is_int=True)
 card(col2, "提前/准时", current_on_time, last_on_time, "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
 card(col3, "逾期", current_overdue, last_overdue, "", is_good_up=False, bg_color="#fef2f2", is_int=True)
@@ -111,7 +121,7 @@ card(col5, "平均交期差值", current_diff_avg, last_diff_avg, "天", is_good
 
 st.markdown("---")
 
-# -------------------------- 月度对比总结 --------------------------
+# -------------------------- 月度总结 --------------------------
 st.subheader("📝 月度对比总结")
 if df_last.empty:
     st.info("无上月数据，无法环比对比")
@@ -131,7 +141,7 @@ else:
 
 st.markdown("---")
 
-# -------------------------- ✨ 交期分析 --------------------------
+# -------------------------- 饼图 & 交期分布 --------------------------
 st.subheader("📊 准时率与时效偏差分布")
 c1, c2 = st.columns(2)
 
@@ -142,15 +152,8 @@ with c1:
             "状态": ["提前/准时", "逾期"],
             "数量": [current_on_time, current_overdue]
         })
-        fig = px.pie(
-            pie_data,
-            values="数量",
-            names="状态",
-            color="状态",
-            color_discrete_map={"提前/准时": "#28a745", "逾期": "#dc3545"},
-            hole=0.3,
-            labels={"数量": "订单数"}
-        )
+        fig = px.pie(pie_data, values="数量", names="状态",
+                     color_discrete_map={"提前/准时":"#28a745","逾期":"#dc3545"}, hole=0.3)
         fig.update_traces(textposition='inside', textinfo='percent+label')
         st.plotly_chart(fig, use_container_width=True)
 
@@ -160,23 +163,22 @@ with c2:
         df_diff = df_current.copy()
         df_diff["差值(天)"] = df_diff["预计-实际交期的差值"].round(0).astype(int)
         diff_counts = df_diff["差值(天)"].value_counts().sort_index(ascending=False)
-
         on_time_diff = diff_counts[diff_counts.index >= 0]
         overdue_diff = diff_counts[diff_counts.index < 0]
 
-        st.markdown("✅ **提前/准时区间分布**")
+        st.markdown("✅ **提前/准时**")
         for day, cnt in on_time_diff.items():
             bar = "🟩" * min(cnt, 20)
             st.markdown(f"- +{day}天: {bar} ({cnt}单)")
 
-        st.markdown("❌ **延迟区间分布**")
+        st.markdown("❌ **延迟**")
         for day, cnt in overdue_diff.items():
             bar = "🟥" * min(cnt, 20)
             st.markdown(f"- {day}天: {bar} ({cnt}单)")
 
 st.markdown("---")
 
-# -------------------------- 明细表 --------------------------
+# -------------------------- 明细 --------------------------
 st.subheader("📋 交期数据明细")
 table_cols = [
     "到货年月", "交期状态", "厂家", "下单时间", "采购单号", "品名", "SKU",
@@ -198,10 +200,7 @@ if not df_current.empty:
         逾期订单=("交期状态", lambda x: (x == "逾期").sum())
     ).reset_index()
 
-    factory_df["总订单"] = factory_df["PO单数"]
-    factory_df["准时率(%)"] = (factory_df["提前准时订单"] / factory_df["总订单"] * 100).round(2)
-    factory_df["逾期率(%)"] = (factory_df["逾期订单"] / factory_df["总订单"] * 100).round(2)
-
+    factory_df["准时率(%)"] = (factory_df["提前准时订单"] / factory_df["PO单数"] * 100).round(2)
     jq_df = df_current.groupby("厂家").agg(
         平均交期差值=("预计-实际交期的差值", "mean"),
         最短实际交期=("实际采购交期", "min"),
