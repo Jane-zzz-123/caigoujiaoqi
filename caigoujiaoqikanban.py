@@ -325,7 +325,7 @@ for idx, row in factory_analysis.iterrows():
         </div>
         """, unsafe_allow_html=True)
 st.markdown("---")
-# -------------------------- 厂家-品类 细分分析 --------------------------
+# -------------------------- 厂家-品类 交期细分分析（已修复语法） --------------------------
 st.subheader("🏷️ 厂家-品类 交期细分分析（按厂家类目明细）")
 
 # 1. 数据预处理：过滤空值，确保类目明细有效
@@ -343,23 +343,19 @@ else:
         订单总数=("采购单号", "count"),
         准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
         逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
-        准时率( %) = ("交期状态", lambda x: round((x == "提前/准时").sum() / len(x) * 100, 1) if len(x) > 0 else 0.0),
-    平均交期差值 = ("预计-实际交期的差值", "mean"),
+        准时率=("交期状态", lambda x: round((x == "提前/准时").sum() / len(x) * 100, 1) if len(x) > 0 else 0.0),
+        平均交期差值=("预计-实际交期的差值", "mean")
     ).reset_index()
+
     # 按厂家+订单数排序
     category_analysis = category_analysis.sort_values(["厂家", "订单总数"], ascending=[True, False])
     st.dataframe(category_analysis, use_container_width=True, height=300)
 
-    # 3. 各厂家核心品类准时率对比图表（每个厂家一个子图）
+    # 3. 各厂家核心品类准时率对比图表
     st.markdown("#### 📊 各厂家核心品类准时率对比")
-    # 筛选订单数≥2的品类（避免单样本无意义）
     category_filtered = category_analysis[category_analysis["订单总数"] >= 2].copy()
-    if category_filtered.empty:
-        st.info("暂无订单数≥2的品类，无法生成对比图表")
-    else:
-        # 按厂家分组生成子图
+    if not category_filtered.empty:
         factories = category_filtered["厂家"].unique()
-        # 动态列数（最多4列）
         col_num = min(4, len(factories))
         cols = st.columns(col_num)
 
@@ -369,12 +365,12 @@ else:
                 fig = px.bar(
                     factory_data,
                     x="厂家类目明细",
-                    y="准时率(%)",
-                    color="准时率(%)",
-                    color_continuous_scale=["#dc3545", "#ffc107", "#28a745"],  # 红-黄-绿
+                    y="准时率",
+                    color="准时率",
+                    color_continuous_scale=["#dc3545", "#ffc107", "#28a745"],
                     range_color=[0, 100],
                     title=f"{factory} 各品类准时率",
-                    text="准时率(%)",
+                    text="准时率",
                     height=300
                 )
                 fig.update_traces(textposition="outside")
@@ -382,95 +378,69 @@ else:
                     xaxis_title="品类",
                     yaxis_title="准时率(%)",
                     yaxis_range=[0, 105],
-                    coloraxis_showscale=False,
-                    title_font=dict(size=14)
+                    coloraxis_showscale=False
                 )
                 st.plotly_chart(fig, use_container_width=True)
 
-    # 4. 厂家-品类 履约评级卡片（标注短板/优势品类）
+    # 4. 厂家-品类 履约结论卡片
     st.markdown("#### 📌 厂家-品类 履约核心结论")
-    # 按厂家聚合，提取每个厂家的关键品类
     factory_category_summary = []
     for factory in df_category["厂家"].unique():
         factory_data = category_analysis[category_analysis["厂家"] == factory]
         if len(factory_data) == 0:
             continue
 
-        # 提取该厂家的关键指标
         total_orders = factory_data["订单总数"].sum()
-        avg_rate = round(factory_data["准时率(%)"].mean(), 1)
+        avg_rate = round(factory_data["准时率"].mean(), 1)
 
-        # 准时率最低的品类（订单数≥1）
-        lowest_rate_row = factory_data[factory_data["订单总数"] >= 1].sort_values("准时率(%)", ascending=True).iloc[0]
-        lowest_category = lowest_rate_row["厂家类目明细"]
-        lowest_rate = lowest_rate_row["准时率(%)"]
-        lowest_orders = lowest_rate_row["订单总数"]
-
-        # 准时率最高的品类（订单数≥1）
-        highest_rate_row = factory_data[factory_data["订单总数"] >= 1].sort_values("准时率(%)", ascending=False).iloc[0]
-        highest_category = highest_rate_row["厂家类目明细"]
-        highest_rate = highest_rate_row["准时率(%)"]
-        highest_orders = highest_rate_row["订单总数"]
+        # 最低/最高准时率品类
+        lowest = factory_data.sort_values("准时率").iloc[0]
+        highest = factory_data.sort_values("准时率", ascending=False).iloc[0]
 
         factory_category_summary.append({
             "厂家": factory,
             "总订单数": total_orders,
             "平均准时率": avg_rate,
-            "短板品类": lowest_category,
-            "短板准时率": lowest_rate,
-            "短板订单数": lowest_orders,
-            "优势品类": highest_category,
-            "优势准时率": highest_rate,
-            "优势订单数": highest_orders
+            "短板品类": lowest["厂家类目明细"],
+            "短板准时率": lowest["准时率"],
+            "短板订单数": lowest["订单总数"],
+            "优势品类": highest["厂家类目明细"],
+            "优势准时率": highest["准时率"],
+            "优势订单数": highest["订单总数"]
         })
 
-    # 卡片展示（4列布局）
+    # 卡片展示
     summary_df = pd.DataFrame(factory_category_summary)
     cols = st.columns(4)
     for idx, row in summary_df.iterrows():
-        # 按短板准时率分色
         if row["短板准时率"] >= 90:
-            bg_color = "#f0fdf4"  # 浅绿
-            border_color = "#bbf7d0"
-            tip = "✅ 全品类履约优秀"
+            bg, bd, tip = "#f0fdf4", "#bbf7d0", "✅ 优秀"
         elif row["短板准时率"] >= 80:
-            bg_color = "#fffbeb"  # 浅橙
-            border_color = "#fed7aa"
-            tip = "⚠️ 部分品类需优化"
+            bg, bd, tip = "#fffbeb", "#fed7aa", "⚠️ 需优化"
         else:
-            bg_color = "#fef2f2"  # 浅红
-            border_color = "#fecaca"
-            tip = "❌ 核心品类逾期严重"
+            bg, bd, tip = "#fef2f2", "#fecaca", "❌ 严重"
 
         with cols[idx % 4]:
             st.markdown(f"""
-            <div style="padding:18px; border-radius:12px; background:{bg_color}; border:2px solid {border_color}; margin-bottom:12px;">
-                <div style="font-size:16px; font-weight:600; margin-bottom:8px;">{row['厂家']}</div>
+            <div style="padding:18px; border-radius:12px; background:{bg}; border:2px solid {bd}; margin-bottom:12px;">
+                <div style="font-size:16px; font-weight:600;">{row['厂家']}</div>
                 <div style="font-size:13px; line-height:1.8;">
                     总订单：{int(row['总订单数'])} 单<br/>
                     平均准时率：{row['平均准时率']}%<br/>
-                    <span style="color:#dc3545;">🔻 短板品类：{row['短板品类']}</span>（{row['短板准时率']}%｜{int(row['短板订单数'])}单）<br/>
-                    <span style="color:#28a745;">🔺 优势品类：{row['优势品类']}</span>（{row['优势准时率']}%｜{int(row['优势订单数'])}单）<br/>
-                    <span style="font-size:12px; color:#666;">{tip}</span>
+                    <span style="color:#dc3545;">🔻 短板：{row['短板品类']}</span>（{row['短板准时率']}%）<br/>
+                    <span style="color:#28a745;">🔺 优势：{row['优势品类']}</span>（{row['优势准时率']}%）<br/>
+                    <span style="font-size:12px;">{tip}</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-    # 5. 总结性文字（自动提炼核心结论）
-    st.markdown("#### 📝 厂家-品类 履约总结")
-    summary_text = []
-    for row in summary_df.iterrows():
-        row = row[1]
+    # 总结文字
+    st.markdown("#### 📝 品类履约总结")
+    texts = []
+    for _, row in summary_df.iterrows():
         if row["短板准时率"] < 80:
-            summary_text.append(
-                f"{row['厂家']}的【{row['短板品类']}】品类履约最差（准时率{row['短板准时率']}%），涉及{int(row['短板订单数'])}单，需重点沟通交期优化；"
-            )
-        if row["优势准时率"] >= 95:
-            summary_text.append(
-                f"{row['厂家']}的【{row['优势品类']}】品类履约优秀（准时率{row['优势准时率']}%），可参考该品类的交期管理方式；"
-            )
-
-    if summary_text:
-        st.success("｜".join(summary_text))
+            texts.append(f"{row['厂家']}【{row['短板品类']}】准时率仅{row['短板准时率']}%，需重点整改")
+    if texts:
+        st.warning("｜".join(texts))
     else:
-        st.info("所有厂家各品类准时率均处于合理区间，无明显短板品类")
+        st.info("所有厂家品类履约良好")
