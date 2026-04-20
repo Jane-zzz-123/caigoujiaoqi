@@ -397,13 +397,13 @@ else:
             # 按你要求自动上色
             if c_rate >= 90:
                 # 优质 → 绿色
-                line = f"✅ <span style='color:#16a34a; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
+                line = f"✅ <span style='color:#16a34a; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
             elif c_rate >= 70:
                 # 合格 → 橙色
-                line = f"🔸 <span style='color:#f97316; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
+                line = f"🔸 <span style='color:#f97316; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
             else:
                 # 短板 → 红色
-                line = f"🔻 <span style='color:#dc2626; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
+                line = f"🔻 <span style='color:#dc2626; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
 
             cat_lines.append(line)
 
