@@ -337,6 +337,9 @@ else:
     category_stats = df_category.groupby(["厂家", "厂家类目明细"]).agg(
         订单数=("采购单号", "count"),
         准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
+        逾期数=("交期状态", lambda x: (x == "逾期").sum()),
+        平均交期=("实际采购交期", "mean"),
+        最长交期=("实际采购交期", "max")
     ).reset_index()
 
     category_stats["准时率%"] = round(
@@ -380,23 +383,27 @@ else:
             border = "#f87171"
             level = "❌ 整体需整改"
 
-        # 品类明细（自动上色）
+        # 品类明细（自动上色 + 显示全部字段）
         cat_lines = []
         for _, row in cats.iterrows():
             c_name = row["厂家类目明细"]
             c_num = row["订单数"]
+            c_on = row["准时数"]
+            c_over = row["逾期数"]
             c_rate = row["准时率%"]
+            c_avg = round(row["平均交期"],1)
+            c_max = round(row["最长交期"],1)
 
             # 按你要求自动上色
             if c_rate >= 90:
                 # 优质 → 绿色
-                line = f"✅ <span style='color:#16a34a; font-weight:bold'>{c_name}</span>：{c_num}单 | {c_rate}%"
+                line = f"✅ <span style='color:#16a34a; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
             elif c_rate >= 70:
                 # 合格 → 橙色
-                line = f"🔸 <span style='color:#f97316; font-weight:bold'>{c_name}</span>：{c_num}单 | {c_rate}%"
+                line = f"🔸 <span style='color:#f97316; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
             else:
                 # 短板 → 红色
-                line = f"🔻 <span style='color:#dc2626; font-weight:bold'>{c_name}</span>：{c_num}单 | {c_rate}%"
+                line = f"🔻 <span style='color:#dc2626; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜均{c_avg}天｜最长{c_max}天"
 
             cat_lines.append(line)
 
