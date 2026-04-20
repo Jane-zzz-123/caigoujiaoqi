@@ -275,59 +275,8 @@ if not df_current.empty:
     st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
-# -------------------------- 逾期分析 --------------------------
-st.subheader("⚠️ 厂家履约评级分析（按准时率）")
+st.subheader("🏷️ 各厂家全品类履约明细卡片（最终修复版）")
 
-# 计算所有厂家指标
-factory_analysis = df_current.groupby("厂家").agg(
-    订单总数=("采购单号", "count"),
-    准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
-    逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
-    平均实际交期=("实际采购交期", "mean"),
-    最长实际交期=("实际采购交期", "max")
-).reset_index()
-
-factory_analysis["准时率"] = (factory_analysis["准时订单数"] / factory_analysis["订单总数"] * 100).round(1)
-factory_analysis["订单占比"] = (factory_analysis["订单总数"] / factory_analysis["订单总数"].sum() * 100).round(1)
-factory_analysis = factory_analysis.sort_values("订单总数", ascending=False).reset_index(drop=True)
-
-# 一行四列卡片展示
-cols = st.columns(4)
-for idx, row in factory_analysis.iterrows():
-    # 评级 + 颜色
-    rate = row["准时率"]
-    if rate >= 90:
-        level = "优质"
-        bg_color = "#f0fdf4"  # 浅绿
-        border_color = "#bbf7d0"
-    elif rate >= 80:
-        level = "合格"
-        bg_color = "#fffbeb"  # 浅橙
-        border_color = "#fed7aa"
-    else:
-        level = "异常"
-        bg_color = "#fef2f2"  # 浅红
-        border_color = "#fecaca"
-
-    with cols[idx % 4]:
-        st.markdown(f"""
-        <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border_color};">
-            <div style="font-size:16px; font-weight:600; margin-bottom:6px;">
-                {row['厂家']} <span style="font-size:13px;">[{level}]</span>
-            </div>
-            <div style="font-size:14px; line-height:1.7;">
-                准时率：{rate}%<br/>
-                订单数：{int(row['订单总数'])} 单（{row['订单占比']}%）<br/>
-                准时：{int(row['准时订单数'])} 单｜逾期：{int(row['逾期订单数'])} 单<br/>
-                平均交期：{row['平均实际交期']:.1f} 天<br/>
-                最长交期：{row['最长实际交期']:.1f} 天
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-st.markdown("---")
-st.subheader("🏷️ 厂家-全品类履约明细结论卡")
-
-# 数据预处理
 df_category = df_current[
     (df_current["厂家"].notna()) &
     (df_current["厂家类目明细"].notna())
@@ -336,7 +285,7 @@ df_category = df_current[
 if df_category.empty:
     st.warning("当前筛选条件下无厂家类目明细数据")
 else:
-    # ========== 1. 重新计算【厂家+品类】维度真实统计 ==========
+    # 1. 厂家+品类维度统计
     category_stats = df_category.groupby(["厂家", "厂家类目明细"]).agg(
         品类订单数=("采购单号", "count"),
         品类准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
@@ -346,10 +295,9 @@ else:
     category_stats["品类准时率%"] = round(
         category_stats["品类准时数"] / category_stats["品类订单数"] * 100, 1
     )
-    # 样本标记：少于3单标注【样本少】
-    category_stats["样本标记"] = category_stats["品类订单数"].apply(lambda x: " ⚠️样本少" if x <= 2 else "")
+    category_stats["样本标记"] = category_stats["品类订单数"].apply(lambda x: " ⚠️样本量过少" if x <= 2 else "")
 
-    # ========== 2. 计算厂家整体真实加权准时率（按订单权重） ==========
+    # 2. 厂家整体加权准时率（真实订单权重）
     factory_total = df_category.groupby("厂家").agg(
         厂家总订单=("采购单号", "count"),
         厂家总准时=("交期状态", lambda x: (x == "提前/准时").sum())
@@ -358,39 +306,41 @@ else:
         factory_total["厂家总准时"] / factory_total["厂家总订单"] * 100, 1
     )
 
-    # ========== 3. 按厂家分组，逐个生成卡片 ==========
-    st.markdown("#### 📌 各厂家全品类履约明细卡片")
+    # 3. 卡片渲染
+    st.markdown("#### 📌 厂家品类履约一览")
     factory_list = factory_total["厂家"].unique()
-    cols = st.columns(3)  # 3列排版，信息更清晰
+    cols = st.columns(3)
 
     for idx, factory_name in enumerate(factory_list):
-        # 当前厂家基础整体数据
         f_data = factory_total[factory_total["厂家"] == factory_name].iloc[0]
         total_order = f_data["厂家总订单"]
         factory_rate = f_data["厂家整体准时率%"]
 
-        # 当前厂家下 所有品类明细
-        this_factory_cats = category_stats[category_stats["厂家"] == factory_name].sort_values("品类准时率%")
+        this_factory_cats = category_stats[category_stats["厂家"] == factory_name].sort_values("品类准时率%",
+                                                                                               ascending=True).reset_index(
+            drop=True)
+        cat_count = len(this_factory_cats)
 
-        # 找最优&最差品类
+        # ===== 核心修复：最差/最优判定 =====
+        only_one_cat = (cat_count == 1)
         worst_cat = this_factory_cats.iloc[0]
         best_cat = this_factory_cats.iloc[-1]
 
-        # 厂家整体评级配色
+        # ===== 修复评级+配色 =====
         if factory_rate >= 90:
             bg_color = "#f0fdf4"
             border_color = "#86efac"
             level = "✅ 整体履约优秀"
-        elif factory_rate >= 80:
+        elif factory_rate >= 70:
             bg_color = "#fffbeb"
             border_color = "#fcd34d"
-            level = "⚠️ 整体基本合格"
+            level = "⚠️ 交期一般，持续关注"
         else:
             bg_color = "#fef2f2"
             border_color = "#fca5a5"
             level = "❌ 整体交期严重逾期"
 
-        # 组装品类明细文本
+        # 组装品类行
         cat_html_list = []
         for _, cat_row in this_factory_cats.iterrows():
             c_name = cat_row["厂家类目明细"]
@@ -398,56 +348,54 @@ else:
             c_rate = cat_row["品类准时率%"]
             c_tag = cat_row["样本标记"]
 
-            # 高亮标记最差/最好
-            if cat_row.equals(worst_cat):
-                line = f'<span style="color:#dc2626; font-weight:bold;">🔻 {c_name}：{c_num}单 | {c_rate}% {c_tag} (全厂最差)</span>'
+            # 单一品类时 不标最差/最优
+            if only_one_cat:
+                line = f'{c_name}：{c_num}单 | {c_rate}% {c_tag}'
+            elif cat_row.equals(worst_cat):
+                line = f'<span style="color:#dc2626; font-weight:bold;">🔻 短板品类 {c_name}：{c_num}单 | {c_rate}% {c_tag} (本厂最低准时率)</span>'
             elif cat_row.equals(best_cat):
-                line = f'<span style="color:#16a34a; font-weight:bold;">🔺 {c_name}：{c_num}单 | {c_rate}% {c_tag} (全厂最优)</span>'
+                line = f'<span style="color:#16a34a; font-weight:bold;">🔺 优势品类 {c_name}：{c_num}单 | {c_rate}% {c_tag} (本厂最高准时率)</span>'
             else:
                 line = f'{c_name}：{c_num}单 | {c_rate}% {c_tag}'
             cat_html_list.append(line)
 
         all_cat_text = "<br>".join(cat_html_list)
 
-        # 输出卡片
+        # 卡片输出
         with cols[idx % 3]:
             st.markdown(f"""
-            <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border_color}; margin-bottom:15px;">
+            <div style="padding:18px; border-radius:12px; background:{bg_color}; border:2px solid {border_color}; margin-bottom:15px;">
                 <div style="font-size:17px; font-weight:bold; margin-bottom:8px;">🏭 {factory_name}</div>
-                <div style="font-size:13px; line-height:1.7;">
+                <div style="font-size:14px; line-height:1.8;">
                     累计总订单：{total_order} 单<br>
                     厂家整体准时率：<b>{factory_rate}%</b><br>
-                    状态评级：{level}<br>
-                    <hr style="margin:8px 0;">
-                    <b>📋 全部品类明细：</b><br>
+                    评级结论：{level}<br>
+                    <hr style="margin:10px 0;">
+                    <b>📂 全部品类明细：</b><br>
                     {all_cat_text}
                 </div>
             </div>
             """, unsafe_allow_html=True)
 
-    # ========== 4. 自动生成全局总结建议 ==========
+    # 全局总结
     st.markdown("---")
-    st.subheader("📝 智能分析结论与优化建议")
+    st.subheader("📋 全局采购优化建议")
+    high_risk = factory_total[factory_total["厂家整体准时率%"] < 70]["厂家"].tolist()
+    medium_risk = factory_total[(factory_total["厂家整体准时率%"] >= 70) & (factory_total["厂家整体准时率%"] < 90)][
+        "厂家"].tolist()
+    good_perform = factory_total[factory_total["厂家整体准时率%"] >= 90]["厂家"].tolist()
 
-    # 筛选问题厂家
-    bad_factory = factory_total[factory_total["厂家整体准时率%"] < 80]
-    good_factory = factory_total[factory_total["厂家整体准时率%"] >= 90]
+    if good_perform:
+        st.success(f"✅ 优质厂家（准时率≥90%，可优先放量）：{'、'.join(good_perform)}")
+    if medium_risk:
+        st.warning(f"⚠️ 待跟进厂家（准时率70%-90%，需沟通改善）：{'、'.join(medium_risk)}")
+    if high_risk:
+        st.error(f"❌ 高风险厂家（准时率＜70%，紧急重点管控）：{'、'.join(high_risk)}")
 
-    if not bad_factory.empty:
-        bad_list = bad_factory["厂家"].tolist()
-        st.error(f"""
-        ⚠️ 高风险厂家预警（整体准时率＜80%，需重点跟进）：
-        {'、'.join(bad_list)}
-        """)
-    if not good_factory.empty:
-        good_list = good_factory["厂家"].tolist()
-        st.success(f"""
-        ✅ 优质履约厂家（整体准时率≥90%，可优先分配订单）：
-        {'、'.join(good_list)}
-        """)
     st.info("""
-    💡 备注说明：
-    1. 准时率已按订单数量加权计算，杜绝偏差
-    2. 标注【样本少】的品类订单≤2单，数据参考性有限
-    3. 红色高亮=该厂家最差品类，绿色高亮=最优品类
+    💡 数据说明：
+    1. 准时率按真实订单加权统计，杜绝平均偏差
+    2. 订单≤2单标注「样本量过少」，数据仅供临时参考
+    3. 单一品类厂家不再重复标记最优/最差
+    4. 红色=短板品类、绿色=优势品类
     """)
