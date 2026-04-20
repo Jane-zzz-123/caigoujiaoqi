@@ -273,7 +273,55 @@ if not df_current.empty:
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="center", x=0.5)
     )
     st.plotly_chart(fig, use_container_width=True)
+# -------------------------- 逾期分析 --------------------------
+st.subheader("⚠️ 厂家履约评级分析（按准时率）")
 
+# 计算所有厂家指标
+factory_analysis = df_current.groupby("厂家").agg(
+    订单总数=("采购单号", "count"),
+    准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
+    平均实际交期=("实际采购交期", "mean"),
+    最长实际交期=("实际采购交期", "max")
+).reset_index()
+
+factory_analysis["准时率"] = (factory_analysis["准时订单数"] / factory_analysis["订单总数"] * 100).round(1)
+factory_analysis["订单占比"] = (factory_analysis["订单总数"] / factory_analysis["订单总数"].sum() * 100).round(1)
+factory_analysis = factory_analysis.sort_values("订单总数", ascending=False).reset_index(drop=True)
+
+# 一行四列卡片展示
+cols = st.columns(4)
+for idx, row in factory_analysis.iterrows():
+    # 评级 + 颜色
+    rate = row["准时率"]
+    if rate >= 90:
+        level = "优质"
+        bg_color = "#f0fdf4"  # 浅绿
+        border_color = "#bbf7d0"
+    elif rate >= 80:
+        level = "合格"
+        bg_color = "#fffbeb"  # 浅橙
+        border_color = "#fed7aa"
+    else:
+        level = "异常"
+        bg_color = "#fef2f2"  # 浅红
+        border_color = "#fecaca"
+
+    with cols[idx % 4]:
+        st.markdown(f"""
+        <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border_color};">
+            <div style="font-size:16px; font-weight:600; margin-bottom:6px;">
+                {row['厂家']} <span style="font-size:13px;">[{level}]</span>
+            </div>
+            <div style="font-size:14px; line-height:1.7;">
+                准时率：{rate}%<br/>
+                订单数：{int(row['订单总数'])} 单（{row['订单占比']}%）<br/>
+                准时：{int(row['准时订单数'])} 单｜逾期：{int(row['逾期订单数'])} 单<br/>
+                平均交期：{row['平均实际交期']:.1f} 天<br/>
+                最长交期：{row['最长实际交期']:.1f} 天
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 st.markdown("---")
 st.subheader("🏷️ 厂家 - 全品类明细履约分析（按准时率自动评级上色）")
 
