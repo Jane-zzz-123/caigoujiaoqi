@@ -564,112 +564,90 @@ for i in range(0, len(cate_list), 3):
                     st.warning("⚠️ 单一供应风险")
 
 
-# ====================== 终极对齐版 产能分析（数据绝对正常） ======================
+# ====================== 真正有用版 厂家产能健康度分析 ======================
 st.markdown("---")
-st.header("🏭 厂家产能负载&下单承载力分析")
-st.caption("口径：评估月为终点，严格往前倒推周期，时间完全对齐，数据真实合理")
+st.header("🏭 厂家真实产能&在手订单压力分析")
+st.caption("核心逻辑：厂家稳定交付能力 VS 当前在手积压订单，精准判断加单风险")
 
-df_cap_final = df.copy()
-df_cap_final["到货年月"] = pd.to_datetime(df_cap_final["到货年月"]).dt.to_period("M")
-df_cap_final["下单年月"] = pd.to_datetime(df_cap_final["下单时间"]).dt.to_period("M")
+df_cap = df.copy()
+df_cap["下单日期"] = pd.to_datetime(df_cap["下单时间"])
+df_cap["到货年月"] = pd.to_datetime(df_cap["到货年月"]).dt.to_period("M")
+df_cap["下单年月"] = df_cap["下单日期"].dt.to_period("M")
 
-# 1. 选择评估月份
-all_month = sorted(df_cap_final["下单年月"].unique(), reverse=True)
-selected_month = st.selectbox("选择评估月份", all_month)
+# 1. 选择统计基准口径
+calc_type = st.selectbox("厂能基准参考周期", ["近3个月", "近半年", "近一年"])
+n_map = {"近3个月":3, "近半年":6, "近一年":12}
+n = n_map[calc_type]
 
-# 2. 计算口径
-calc_type = st.selectbox("基准产能计算口径", ["近3个月", "近半年", "近一年"])
-month_map = {"近3个月":3, "近半年":6, "近一年":12}
-n = month_map[calc_type]
+# 2. 计算厂家稳定基准产能（纯历史真实到货）
+latest_arrive_month = df_cap["到货年月"].max()
+base_start = latest_arrive_month - (n-1)
+base_range = pd.period_range(start=base_start, end=latest_arrive_month, freq='M')
 
-# ✅ 核心修正：以选中的评估月为终点，往前倒推N个完整自然月
-start_month = selected_month - (n - 1)
-# 生成连续完整日历月（哪怕当月0到货，也计入周期）
-full_period_range = pd.period_range(start=start_month, end=selected_month, freq="M")
-
-st.info(f"📌 当前统计周期：{start_month} ～ {selected_month}（共{n}个完整自然月）")
-
-# 3. 周期内到货统计
-df_period = df_cap_final[df_cap_final["到货年月"].isin(full_period_range)]
-total_arrive = df_period.groupby("厂家")["采购量"].sum().reset_index()
-total_arrive.columns = ["厂家", f"{calc_type}周期总到货"]
-
-# 基准产能：总和 / 固定月份数，绝对公平透明
-total_arrive["厂家月度基准产能"] = (total_arrive[f"{calc_type}周期总到货"] / n).round(0)
-
-# 4. 当月数据
-## 当月下单
-current_order = df_cap_final[df_cap_final["下单年月"] == selected_month]\
+base_df = df_cap[df_cap["到货年月"].isin(base_range)]\
     .groupby("厂家")["采购量"].sum().reset_index()
-current_order.columns = ["厂家", "当月下单总负载"]
+base_df["稳定月度基准产能"] = (base_df["采购量"] / n).round(0)
+base_df = base_df[["厂家", "稳定月度基准产能"]]
 
-## 当月到货
-current_arrive = df_cap_final[df_cap_final["到货年月"] == selected_month]\
-    .groupby("厂家")["采购量"].sum().reset_index()
-current_arrive.columns = ["厂家", "当月实际到货产出"]
+st.info(f"📌 产能基准参考周期：{base_start} ~ {latest_arrive_month}")
 
-# 5. 合并计算
-final_df = total_arrive.merge(current_order, on="厂家", how="outer")\
-                       .merge(current_arrive, on="厂家", how="outer").fillna(0)
+# 3. 计算当前 已下单、未到货 的在手积压订单
+current_month = pd.to_datetime("today").to_period("M")
+unfinish_df = df_cap[
+    (df_cap["下单年月"] <= current_month) &
+    (df_cap["到货年月"] > current_month)
+].groupby("厂家")["采购量"].sum().reset_index()
+unfinish_df.columns = ["厂家", "当前在手未交付订单总量"]
 
-# 6. 比率计算（防除0报错）
-final_df["产能负载利用率%"] = 0.0
-valid_mask = final_df["厂家月度基准产能"] > 0
-final_df.loc[valid_mask, "产能负载利用率%"] = (
-    final_df.loc[valid_mask, "当月下单总负载"] / final_df.loc[valid_mask, "厂家月度基准产能"] * 100
-).round(2)
+# 4. 合并计算产能占用率
+final_df = pd.merge(base_df, unfinish_df, on="厂家", how="outer").fillna(0)
+final_df = final_df[final_df["稳定月度基准产能"] > 0].reset_index(drop=True)
 
-# 7. 合理分级，杜绝夸张判定
-def get_status(rate):
-    if rate <= 70:
-        return "✅ 产能富余，可大量加单"
-    elif rate <= 100:
-        return "⚠️ 产能饱满，少量谨慎加单"
-    elif rate <= 130:
-        return "🔴 产能过载，严禁新增订单"
+final_df["在手产能占用率%"] = (final_df["当前在手未交付订单总量"] / final_df["稳定月度基准产能"] * 100).round(2)
+
+# 5. 产能健康判定
+def get_health_status(rate):
+    if rate <= 60:
+        return "✅ 产能空闲，可大量加单"
+    elif rate <= 90:
+        return "⚠️ 产能健康，少量谨慎加单"
+    elif rate <= 120:
+        return "🔴 接近满负荷，严控新增订单"
     else:
-        return "🚨 严重超负荷，立刻分流订单"
+        return "🚨 严重过载，立刻分流订单"
 
-final_df["产能状态&下单建议"] = final_df["产能负载利用率%"].apply(get_status)
+final_df["产能健康&操作建议"] = final_df["在手产能占用率%"].apply(get_health_status)
 
-# 排序
-final_df = final_df.sort_values("产能负载利用率%", ascending=False).reset_index(drop=True)
+# 排序：风险从高到低
+final_df = final_df.sort_values("在手产能占用率%", ascending=False).reset_index(drop=True)
 
-# 8. 表格展示
-show_cols = [
-    "厂家", f"{calc_type}周期总到货", "厂家月度基准产能",
-    "当月实际到货产出", "当月下单总负载",
-    "产能负载利用率%", "产能状态&下单建议"
-]
-
+# 6. 表格展示
 st.dataframe(
-    final_df[show_cols].style.format({
-        f"{calc_type}周期总到货": "{:,.0f}",
-        "厂家月度基准产能": "{:,.0f}",
-        "当月实际到货产出": "{:,.0f}",
-        "当月下单总负载": "{:,.0f}",
-        "产能负载利用率%": "{:.2f}%"
+    final_df.style.format({
+        "稳定月度基准产能": "{:,.0f}",
+        "当前在手未交付订单总量": "{:,.0f}",
+        "在手产能占用率%": "{:.2f}%"
     }),
     use_container_width=True
 )
 
-# 9. 一行四列决策卡片
+# 7. 一行四列决策卡片
 st.markdown("---")
-st.subheader("💡 采购下单指引")
+st.subheader("💡 采购订单分配指引")
 status_order = [
-    "✅ 产能富余，可大量加单",
-    "⚠️ 产能饱满，少量谨慎加单",
-    "🔴 产能过载，严禁新增订单",
-    "🚨 严重超负荷，立刻分流订单"
+    "🚨 严重过载，立刻分流订单",
+    "🔴 接近满负荷，严控新增订单",
+    "⚠️ 产能健康，少量谨慎加单",
+    "✅ 产能空闲，可大量加单"
 ]
 cols = st.columns(4)
-groups = final_df.groupby("产能状态&下单建议")
+groups = final_df.groupby("产能健康&操作建议")
 
 for i, status in enumerate(status_order):
     with cols[i]:
         st.markdown(f"**{status}**")
         if status in groups.groups:
-            for _, r in groups.get_group(status).iterrows():
-                st.caption(f"{r['厂家']} | 负载 {r['产能负载利用率%']:.0f}%")
+            for _, row in groups.get_group(status).iterrows():
+                st.caption(f"{row['厂家']} | 占用 {row['在手产能占用率%']:.0f}%")
         else:
             st.caption("暂无厂家")
