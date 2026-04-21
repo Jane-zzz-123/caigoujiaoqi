@@ -443,62 +443,71 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 【最终版】产品分类 × 厂家 全局履约一览（不占位置 · 一眼看清） --------------------------
+# -------------------------- 升级版：产品分类分组折叠对比看板 --------------------------
 st.markdown("---")
-st.subheader("📊 产品分类 × 厂家 履约对比总表（一眼纵观）")
+st.subheader("📦 产品分类 · 厂家履约分组对比")
 
-# 1. 基础聚合计算
-compare_df = df_current.groupby(["产品分类", "厂家"]).agg(
+# 基础聚合
+cate_compare = df_current.groupby(["产品分类", "厂家"]).agg(
     订单数=("采购单号", "count"),
     准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
     逾期数=("交期状态", lambda x: (x == "逾期").sum()),
     平均交期=("实际采购交期", "mean"),
-    采购量合计=("采购量", "sum"),
+    采购量合计=("采购量", "sum")
 ).reset_index()
 
-# 计算准时率
-compare_df["准时率"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
+cate_compare["准时率"] = (cate_compare["准时数"] / cate_compare["订单数"] * 100).round(1)
 
-# 评级
-def get_level(rate):
+
+# 评级+配色
+def get_style(rate):
     if rate >= 90:
-        return "🟢 优质"
+        return "🟢 优质", "#f0fdf4", "#16a34a"
     elif rate >= 80:
-        return "🟡 合格"
+        return "🟡 合格", "#fffbeb", "#ca8a04"
     else:
-        return "🔴 异常"
+        return "🔴 异常", "#fef2f2", "#dc2626"
 
-compare_df["履约等级"] = compare_df["准时率"].apply(get_level)
 
-# 2. 统计每个分类有几个厂家
-cate_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index()
-cate_count.columns = ["产品分类", "厂家数"]
-compare_df = compare_df.merge(cate_count, on="产品分类", how="left")
+cate_compare[["等级", "背景色", "文字色"]] = cate_compare["准时率"].apply(get_style).apply(pd.Series)
 
-# 3. 排序：差的放最上面
-compare_df = compare_df.sort_values(
-    by=["准时率", "厂家数"], ascending=[True, True]
-).reset_index(drop=True)
+# 统计每个分类厂家数量
+cate_count = cate_compare.groupby("产品分类")["厂家"].nunique().reset_index(name="厂家数量")
+cate_compare = cate_compare.merge(cate_count, on="产品分类")
 
-# 4. 直接显示精简表格（带颜色 · 不报错）
-display_cols = [
-    "产品分类", "厂家数", "厂家", "准时率", "履约等级",
-    "订单数", "准时数", "逾期数", "平均交期", "采购量合计"
-]
+# 排序：先按厂家数升序（单一供应商置顶），再准时率升序（最差优先）
+cate_compare = cate_compare.sort_values(["厂家数量", "准时率"], ascending=[True, True])
 
-# 展示
-st.dataframe(
-    compare_df[display_cols],
-    use_container_width=True,
-    hide_index=True,
-    height=500
-)
+# 遍历每个产品分类分组展示
+all_category = cate_compare["产品分类"].unique()
 
-# 说明
+for category in all_category:
+    data = cate_compare[cate_compare["产品分类"] == category].reset_index(drop=True)
+    supplier_num = data["厂家数量"].iloc[0]
+
+    # 折叠容器
+    with st.expander(f"📦 {category} ｜ 共 {supplier_num} 家供应商 {' ⚠️ 单一供应风险' if supplier_num == 1 else ''}"):
+
+        # 多厂家：横向并排对比
+        cols = st.columns(min(supplier_num, 4))
+        for idx, row in data.iterrows():
+            with cols[idx % 4]:
+                st.markdown(f"""
+                <div style="padding:15px; border-radius:10px; background:{row['背景色']}; text-align:center;">
+                    <div style="font-weight:bold; font-size:16px;">{row['厂家']}</div>
+                    <div style="font-size:20px; font-weight:bold; color:{row['文字色']};">{row['准时率']}%</div>
+                    <div>{row['等级']}</div>
+                    <hr style="margin:8px 0;">
+                    <div>订单：{row['订单数']} 单</div>
+                    <div>交期：{row['平均交期']:.1f} 天</div>
+                    <div>采购量：{int(row['采购量合计'])}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
 st.info("""
-💡 快速看懂：
-• 🔴 异常 = 优先整改 / 找备用厂家
-• 🟡 合格 = 正常观察
-• 🟢 优质 = 优先下单
-• 厂家数=1 = 单一供应商，风险高
+💡 解读优势：
+1. 🔴 红色=履约异常，优先整改
+2. ⚠️ 标注=该品类只有1家供应商，断货/议价风险极高
+3. 同分类多厂家并排，谁好谁差一眼对比
+4. 折叠收起，页面极度整洁不杂乱
 """)
