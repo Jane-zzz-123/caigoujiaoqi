@@ -480,7 +480,7 @@ if total_orders > 0:
         订单数=("采购单号", "count"),
         准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100),
         采购量=("采购量", "sum"),
-        到货量=("实际到货量", "sum")
+        到货量=("到货量", "sum")
     ).reset_index()
 
     factory_kpi["到货完成率"] = (factory_kpi["到货量"] / factory_kpi["采购量"] * 100).round(2)
@@ -529,7 +529,7 @@ if total_orders > 0:
         订单数=("采购单号", "count"),
         准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100),
         采购量=("采购量", "sum"),
-        到货量=("实际到货量", "sum")
+        到货量=("到货量", "sum")
     ).reset_index()
 
     factory_score["到货完成率"] = factory_score["到货量"] / factory_score["采购量"] * 100
