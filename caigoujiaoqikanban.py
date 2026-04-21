@@ -563,18 +563,17 @@ for i in range(0, len(cate_list), 3):
                 if group_data["厂家数"].iloc[0] == 1:
                     st.warning("⚠️ 单一供应风险")
 
-# ====================== 终极完美版：产能 + 准时率 + 订单对比分析 ======================
+# ====================== 最终完美版：产能+准时率+订单对比（适配你的两类交期状态） ======================
 st.markdown("---")
 st.header("🏭 厂家多维度产能 & 准时率 & 订单放量综合分析")
-st.caption("自动计算准时率 | 展示当月/近3月/近半年/近一年/历史最高产能 | 订单风险判断")
 
 df_final = df.copy()
 
-# ====================== 时间格式化 ======================
+# 时间格式化
 df_final["下单年月"] = pd.to_datetime(df_final["下单时间"]).dt.to_period("M")
 df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period("M")
 
-# ====================== 选择评估月份 ======================
+# 选择评估月份
 order_months = sorted(df_final["下单年月"].unique(), reverse=True)
 selected_month = st.selectbox("选择订单评估月份", order_months)
 
@@ -585,13 +584,15 @@ p6 = pd.period_range(end_month - 5, end_month, freq='M')
 p12 = pd.period_range(end_month - 11, end_month, freq='M')
 
 
-# ====================== 1. 计算各维度产能 ======================
+# ------------------------------
+# 1. 各维度产能计算
+# ------------------------------
 def get_cap(df, period):
     dfp = df[df["到货年月"].isin(period)]
     mon = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
     avg = mon.groupby(level=0).mean().round(0)
-    max_c = mon.groupby(level=0).max()
-    return avg, max_c
+    max_cap = mon.groupby(level=0).max()
+    return avg, max_cap
 
 
 cap_now, _ = get_cap(df_final, [end_month])
@@ -605,53 +606,59 @@ cap_6m = cap_6m.rename("近半年平均产能")
 cap_12m = cap_12m.rename("近一年平均产能")
 cap_max = cap_max.rename("历史最高单月产能")
 
-# ====================== 2. 按你的规则自动计算准时率 ======================
+# ------------------------------
+# 2. 按你的规则计算准时率（仅两类：提前/准时 | 逾期）
+# ------------------------------
 df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
-df_p6["是否准时"] = df_p6["交期状态"].apply(lambda x: 1 if x in ["提前", "准时"] else 0)
+df_p6["准时标记"] = df_p6["交期状态"].apply(lambda x: 1 if x == "提前/准时" else 0)
 
-on_time_rate = df_p6.groupby("厂家")["是否准时"].mean() * 100
+on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
 on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
 
-# ====================== 3. 当月订单量 ======================
+# ------------------------------
+# 3. 当月订单放量
+# ------------------------------
 order_now = df_final[df_final["下单年月"] == selected_month] \
     .groupby("厂家")["采购量"].sum().rename("当月订单放量")
 
-# ====================== 4. 合并所有数据 ======================
+# ------------------------------
+# 4. 合并数据
+# ------------------------------
 result = pd.concat([
     cap_now, cap_3m, cap_6m, cap_12m, cap_max,
     on_time_rate, order_now
 ], axis=1).fillna(0).reset_index()
 
 
-# ====================== 5. 智能分析（产能 + 准时率 双维度判断） ======================
-def analyze(row):
+# ------------------------------
+# 5. 最终分析（产能 × 准时率 = 安全接单量）
+# ------------------------------
+def order_analysis(row):
     order = row["当月订单放量"]
     max_cap = row["历史最高单月产能"]
     ot_rate = row["近半年准时率%"]
 
     if max_cap == 0:
-        return "⚪ 无历史产能"
+        return "⚪ 无历史产能数据"
 
-    # 越不准时，能安全承接的订单越少
     safe_cap = max_cap * (ot_rate / 100)
-    if safe_cap == 0:
-        return "🟡 准时率过低，不建议加单"
+    load = (order / safe_cap * 100) if safe_cap > 0 else 999
 
-    load_rate = order / safe_cap * 100
-
-    if load_rate <= 70:
+    if load <= 70:
         return "✅ 非常安全，可加量"
-    elif load_rate <= 100:
+    elif load <= 100:
         return "🟢 匹配合理，正常发放"
-    elif load_rate <= 130:
+    elif load <= 130:
         return "⚠️ 压力偏高，谨慎加单"
     else:
         return "🔴 超载风险高，极易延期"
 
 
-result["最终订单建议"] = result.apply(analyze, axis=1)
+result["最终订单建议"] = result.apply(order_analysis, axis=1)
 
-# ====================== 展示表格 ======================
+# ------------------------------
+# 表格展示
+# ------------------------------
 show_cols = [
     "厂家", "当月实际产能", "近3个月平均产能", "近半年平均产能",
     "近一年平均产能", "历史最高单月产能", "近半年准时率%",
@@ -671,7 +678,9 @@ st.dataframe(
     use_container_width=True, height=600
 )
 
-# ====================== 一行四列卡片 ======================
+# ------------------------------
+# 一行四列卡片
+# ------------------------------
 st.markdown("---")
 st.subheader("💡 采购订单放量决策")
 status_order = [
@@ -692,11 +701,10 @@ for i, s in enumerate(status_order):
         else:
             st.caption("暂无")
 
-# 说明
-st.info(f"""
-📌 分析逻辑（完全按你的业务规则）
-1. 准时率 = 近半年（提前/准时）订单占比
-2. 安全承接产能 = 历史最高产能 × 准时率
-3. 订单负载 = 当月订单 ÷ 安全产能
-4. 准时率越低，越不能多给单，避免延期
+st.info("""
+📌 逻辑说明（完全按你的数据结构）
+• 准时率 = 近半年「提前/准时」订单占比
+• 安全产能 = 历史最高产能 × 准时率
+• 订单负载 = 当月订单 ÷ 安全产能
+• 准时率越低，越不能多放量，避免延期风险
 """)
