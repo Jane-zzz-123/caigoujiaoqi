@@ -506,3 +506,47 @@ st.dataframe(final_table, use_container_width=True, hide_index=True)
 st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
+# -------------------------- 品类采购决策总结（厂家+完整数据标注） --------------------------
+st.markdown("---")
+st.subheader("💡 各品类采购下单建议参考")
+
+# 按产品分类分组遍历
+summary_group = compare_df.groupby("产品分类", sort=False)
+
+for cate, group_data in summary_group:
+    # 拆分不同等级厂家，附带格式化数据
+    def format_supplier_info(df_level):
+        info_list = []
+        for _, row in df_level.iterrows():
+            info = f"{row['厂家']}（总订单{int(row['订单数'])}｜准时{int(row['准时数'])}｜逾期{int(row['逾期数'])}｜准时率{row['准时率%']}%）"
+            info_list.append(info)
+        return info_list
+
+
+    # 分等级格式化
+    good_list = format_supplier_info(group_data[group_data["等级"] == "🟢 优质"])
+    normal_list = format_supplier_info(group_data[group_data["等级"] == "🟡 合格"])
+    bad_list = format_supplier_info(group_data[group_data["等级"] == "🔴 异常"])
+
+    supplier_count = group_data["厂家数"].iloc[0]
+    is_single = supplier_count == 1
+
+    # 输出品类标题
+    st.markdown(f"#### 📦 {cate}（共 {supplier_count} 家合作供应商）")
+
+    # 逐条输出建议
+    if good_list:
+        st.markdown(f"✅ **【优先主力下单 · 优质履约】**：{'；'.join(good_list)}")
+    if normal_list:
+        st.markdown(f"⚠️ **【适量控制订单 · 合格水平】**：{'；'.join(normal_list)}")
+    if bad_list:
+        st.markdown(f"🔴 **【严控新增大单 · 重点整改】**：{'；'.join(bad_list)}")
+
+    # 特殊风险提示
+    if is_single:
+        st.warning("🚨 高风险提醒：该品类为**独家单一供应商**，断货、议价能力弱，建议紧急开发备选优质厂家！")
+
+    if not good_list:
+        st.info("💡 整体策略：该品类暂无优质履约厂家，后续采购务必分散订单、优先倾斜给到当前相对最优的供应商。")
+
+    st.divider()
