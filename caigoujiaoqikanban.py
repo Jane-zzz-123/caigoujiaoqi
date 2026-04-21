@@ -563,9 +563,9 @@ for i in range(0, len(cate_list), 3):
                 if group_data["厂家数"].iloc[0] == 1:
                     st.warning("⚠️ 单一供应风险")
 
-# ====================== 最终完美版：产能+准时率+订单对比（适配你的两类交期状态） ======================
+# ====================== 科学优化版：近半年平均产能为基准 ======================
 st.markdown("---")
-st.header("🏭 厂家多维度产能 & 准时率 & 订单放量综合分析")
+st.header("🏭 厂家产能&准时率&订单放量综合分析（科学基准版）")
 
 df_final = df.copy()
 
@@ -577,134 +577,115 @@ df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period
 order_months = sorted(df_final["下单年月"].unique(), reverse=True)
 selected_month = st.selectbox("选择订单评估月份", order_months)
 
-# 倒推周期
+# 周期区间（以所选月份为终点倒推）
 end_month = selected_month
-p3 = pd.period_range(end_month - 2, end_month, freq='M')
-p6 = pd.period_range(end_month - 5, end_month, freq='M')
+p3  = pd.period_range(end_month - 2,  end_month, freq='M')
+p6  = pd.period_range(end_month - 5,  end_month, freq='M')
 p12 = pd.period_range(end_month - 11, end_month, freq='M')
 
-
-# ------------------------------
-# 1. 各维度产能计算
-# ------------------------------
+# 产能计算函数
 def get_cap(df, period):
     dfp = df[df["到货年月"].isin(period)]
-    mon = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
-    avg = mon.groupby(level=0).mean().round(0)
-    max_cap = mon.groupby(level=0).max()
-    return avg, max_cap
+    monthly = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
+    avg_cap = monthly.groupby(level=0).mean().round(0)
+    max_cap = monthly.groupby(level=0).max()
+    return avg_cap, max_cap
 
+# 多口径产能
+cap_now, _       = get_cap(df_final, [end_month])
+cap_3m, _        = get_cap(df_final, p3)
+cap_6m, cap_max  = get_cap(df_final, p6)
+cap_12m, _       = get_cap(df_final, p12)
 
-cap_now, _ = get_cap(df_final, [end_month])
-cap_3m, _ = get_cap(df_final, p3)
-cap_6m, _ = get_cap(df_final, p6)
-cap_12m, cap_max = get_cap(df_final, p12)
+# 重命名列
+cap_now   = cap_now.rename("当月实际产能")
+cap_3m    = cap_3m.rename("近3个月平均产能")
+cap_6m    = cap_6m.rename("近半年平均产能（基准）")
+cap_12m   = cap_12m.rename("近一年平均产能")
+cap_max   = cap_max.rename("历史最高单月产能")
 
-cap_now = cap_now.rename("当月实际产能")
-cap_3m = cap_3m.rename("近3个月平均产能")
-cap_6m = cap_6m.rename("近半年平均产能")
-cap_12m = cap_12m.rename("近一年平均产能")
-cap_max = cap_max.rename("历史最高单月产能")
-
-# ------------------------------
-# 2. 按你的规则计算准时率（仅两类：提前/准时 | 逾期）
-# ------------------------------
+# 准时率计算（适配你的两类交期状态）
 df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
 df_p6["准时标记"] = df_p6["交期状态"].apply(lambda x: 1 if x == "提前/准时" else 0)
-
 on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
 on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
 
-# ------------------------------
-# 3. 当月订单放量
-# ------------------------------
-order_now = df_final[df_final["下单年月"] == selected_month] \
+# 当月订单放量
+order_now = df_final[df_final["下单年月"] == selected_month]\
     .groupby("厂家")["采购量"].sum().rename("当月订单放量")
 
-# ------------------------------
-# 4. 合并数据
-# ------------------------------
+# 合并所有数据
 result = pd.concat([
     cap_now, cap_3m, cap_6m, cap_12m, cap_max,
     on_time_rate, order_now
 ], axis=1).fillna(0).reset_index()
 
+# 核心：安全产能+负载计算（改用近半年平均产能为基准）
+result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
+result["产能负载利用率%"] = 0.0
+mask = result["安全可放量产能"] > 0
+result.loc[mask, "产能负载利用率%"] = (
+    result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100
+).round(1)
 
-# ------------------------------
-# 5. 最终分析（产能 × 准时率 = 安全接单量）
-# ------------------------------
-def order_analysis(row):
-    order = row["当月订单放量"]
-    max_cap = row["历史最高单月产能"]
-    ot_rate = row["近半年准时率%"]
-
-    if max_cap == 0:
-        return "⚪ 无历史产能数据"
-
-    safe_cap = max_cap * (ot_rate / 100)
-    load = (order / safe_cap * 100) if safe_cap > 0 else 999
-
-    if load <= 70:
-        return "✅ 非常安全，可加量"
-    elif load <= 100:
+# 最终订单建议
+def get_advice(rate):
+    if rate <= 70:
+        return "✅ 非常安全，可大幅加单"
+    elif rate <= 100:
         return "🟢 匹配合理，正常发放"
-    elif load <= 130:
+    elif rate <= 130:
         return "⚠️ 压力偏高，谨慎加单"
     else:
         return "🔴 超载风险高，极易延期"
 
+result["最终订单建议"] = result["产能负载利用率%"].apply(get_advice)
 
-result["最终订单建议"] = result.apply(order_analysis, axis=1)
-
-# ------------------------------
 # 表格展示
-# ------------------------------
 show_cols = [
-    "厂家", "当月实际产能", "近3个月平均产能", "近半年平均产能",
-    "近一年平均产能", "历史最高单月产能", "近半年准时率%",
-    "当月订单放量", "最终订单建议"
+    "厂家","当月实际产能","近3个月平均产能","近半年平均产能（基准）",
+    "近一年平均产能","历史最高单月产能","近半年准时率%",
+    "安全可放量产能","当月订单放量","产能负载利用率%","最终订单建议"
 ]
 
 st.dataframe(
     result[show_cols].style.format({
         "当月实际产能": "{:,.0f}",
         "近3个月平均产能": "{:,.0f}",
-        "近半年平均产能": "{:,.0f}",
+        "近半年平均产能（基准）": "{:,.0f}",
         "近一年平均产能": "{:,.0f}",
         "历史最高单月产能": "{:,.0f}",
         "近半年准时率%": "{:.1f}%",
-        "当月订单放量": "{:,.0f}"
-    }),
-    use_container_width=True, height=600
+        "安全可放量产能": "{:,.0f}",
+        "当月订单放量": "{:,.0f}",
+        "产能负载利用率%": "{:.1f}%"
+    }), use_container_width=True, height=600
 )
 
-# ------------------------------
-# 一行四列卡片
-# ------------------------------
+# 一行四列决策卡片
 st.markdown("---")
-st.subheader("💡 采购订单放量决策")
-status_order = [
-    "✅ 非常安全，可加量",
-    "🟢 匹配合理，正常发放",
+st.subheader("💡 采购放量决策指引")
+status_sort = [
+    "🔴 超载风险高，极易延期",
     "⚠️ 压力偏高，谨慎加单",
-    "🔴 超载风险高，极易延期"
+    "🟢 匹配合理，正常发放",
+    "✅ 非常安全，可大幅加单"
 ]
 cols = st.columns(4)
 groups = result.groupby("最终订单建议")
 
-for i, s in enumerate(status_order):
-    with cols[i]:
-        st.markdown(f"**{s}**")
-        if s in groups.groups:
-            for _, r in groups.get(s).iterrows():
-                st.caption(f"{r['厂家']}")
+for idx, status in enumerate(status_sort):
+    with cols[idx]:
+        st.markdown(f"**{status}**")
+        if status in groups.groups:
+            for _, r in groups.get_group(status).iterrows():
+                st.caption(f"{r['厂家']} | 负载 {r['产能负载利用率%']:.0f}%")
         else:
-            st.caption("暂无")
+            st.caption("暂无厂家")
 
 st.info("""
-📌 逻辑说明（完全按你的数据结构）
-• 准时率 = 近半年「提前/准时」订单占比
-• 安全产能 = 历史最高产能 × 准时率
-• 订单负载 = 当月订单 ÷ 安全产能
-• 准时率越低，越不能多放量，避免延期风险
+📌 口径优化说明：
+1. 基准产能改为【近半年平均产能】，代表厂家常态化稳定产出，比历史峰值更科学
+2. 安全产能 = 半年平均产能 × 准时率
+3. 不再用偶然极限产能做判断，结论更贴合真实交付预期
 """)
