@@ -506,29 +506,30 @@ st.dataframe(final_table, use_container_width=True, hide_index=True)
 st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
-# -------------------------- 三列并排 · 品类采购决策总结 --------------------------
+# -------------------------- 修复版：三列并排 · 品类采购决策总结 --------------------------
 st.markdown("---")
 st.subheader("💡 各品类采购下单决策汇总")
 
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# 3列布局循环渲染
+# 3列布局循环
 for i in range(0, len(cate_list), 3):
-    # 每次取3个品类为一组
-    batch = cate_list[i:i+3]
+    batch = cate_list[i:i + 3]
     cols = st.columns(3)
 
     for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
 
-            # 格式化厂家+完整数据
+            # 格式化厂家数据
             def fmt_sup(df_sub):
                 res = []
                 for _, r in df_sub.iterrows():
+                    # 格式：厂家名<br>订单数|准时数|逾期数|准时率
                     txt = f"{r['厂家']}<br>订单{int(r['订单数'])}｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                     res.append(txt)
                 return res
+
 
             good = fmt_sup(group_data[group_data["等级"] == "🟢 优质"])
             normal = fmt_sup(group_data[group_data["等级"] == "🟡 合格"])
@@ -537,28 +538,39 @@ for i in range(0, len(cate_list), 3):
             sup_cnt = group_data["厂家数"].iloc[0]
             single_flag = sup_cnt == 1
 
-            # 卡片容器样式
+            # 核心修复：使用正确的 HTML 格式，加上背景色和内边距
             html_content = f"""
 <div style="padding:14px; border-radius:10px; border:1px solid #e5e7eb; background:#ffffff;">
-    <h5 style="margin:0 0 10px 0;">📦 {cate}</h5>
+    <h5 style="margin:0 0 10px 0; font-size:16px;">📦 {cate}</h5>
+
     <p style="margin:6px 0;"><b>✅ 优先下单优质厂家</b></p>
-    <p style="margin:4px 0; font-size:13px;">{'<br>'.join(good) if good else '暂无'}</p>
-    <hr style="margin:8px 0;">
+    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(good) if good else '暂无'}</p>
+
+    <hr style="margin:8px 0; border-top: 1px dashed #eee;">
+
     <p style="margin:6px 0;"><b>⚠️ 合格可控厂家</b></p>
-    <p style="margin:4px 0; font-size:13px;">{'<br>'.join(normal) if normal else '暂无'}</p>
-    <hr style="margin:8px 0;">
+    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(normal) if normal else '暂无'}</p>
+
+    <hr style="margin:8px 0; border-top: 1px dashed #eee;">
+
     <p style="margin:6px 0;"><b>🔴 谨慎合作异常厂家</b></p>
-    <p style="margin:4px 0; font-size:13px;">{'<br>'.join(bad) if bad else '暂无'}</p>
+    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(bad) if bad else '暂无'}</p>
 """
-            # 风险提示追加
-            if single_flag:
-                html_content += """
-    <p style="color:#dc2626; margin:10px 0 0 0; font-weight:bold;">🚨 单一供应风险</p>
-"""
+            # 追加：暂无优质供应商的黄色高亮提示（修复代码）
             if not good:
                 html_content += """
-    <p style="color:#ca8a04; margin:10px 0 0 0;">💡 暂无优质供应商</p>
+    <div style="margin-top:10px; padding:8px; background-color:#fffbeb; color:#b45309; border-radius:6px; font-weight:bold; font-size:13px;">
+        💡 该品类暂无优质供应商，建议优化供应结构
+    </div>
 """
+            # 追加：单一供应商风险提示（红色高亮）
+            if single_flag:
+                html_content += """
+    <div style="margin-top:10px; padding:8px; background-color:#fef2f2; color:#dc2626; border-radius:6px; font-weight:bold; font-size:13px;">
+        🚨 高风险提醒：独家单一供应商
+    </div>
+"""
+            # 闭合 div 标签
             html_content += "</div>"
 
             st.markdown(html_content, unsafe_allow_html=True)
