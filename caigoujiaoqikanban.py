@@ -562,43 +562,96 @@ for i in range(0, len(cate_list), 3):
                     st.info("💡 暂无优质供方")
                 if group_data["厂家数"].iloc[0] == 1:
                     st.warning("⚠️ 单一供应风险")
-# ============== 产能采购决策建议 一行四列 + 新增占比 ==============
+# ====================== 单月厂家产能分析 · 正确版 ======================
+st.markdown("---")
+st.header("📊 单月厂家产能分析（到货VS下单）")
+st.caption("核心逻辑：当月到货量=真实产能 | 当月下单量=订单负荷 | 直接对比评估产能")
+
+# 数据复制
+df_prod = df.copy()
+
+# 时间标准化
+df_prod["下单年月"] = pd.to_datetime(df_prod["下单时间"]).dt.to_period("M")
+df_prod["到货年月"] = pd.to_datetime(df_prod["到货年月"]).dt.to_period("M")
+
+# 选择分析月份
+month_list = sorted(df_prod["到货年月"].unique(), reverse=True)
+select_month = st.selectbox("选择分析月份", month_list)
+
+# ============== 核心指标计算 ==============
+# 1. 当月到货量 = 真实产能
+df_arrive = df_prod[df_prod["到货年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
+df_arrive.columns = ["厂家", "当月到货产能"]
+
+# 2. 当月下单量 = 订单负荷
+df_order = df_prod[df_prod["下单年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
+df_order.columns = ["厂家", "当月下单量"]
+
+# 3. 合并（全部保留，不删除任何数据）
+df_final = pd.merge(df_arrive, df_order, on="厂家", how="outer").fillna(0)
+
+# 4. 产能健康度判断（完全按你说的：到货 VS 下单）
+def judge_capacity(arrive, order):
+    if order == 0:
+        return "⚪ 本月无订单"
+    if arrive >= order * 0.9:
+        return "✅ 产能充足"
+    elif arrive >= order * 0.7:
+        return "⚠️ 产能正常"
+    elif arrive >= order * 0.5:
+        return "🔴 产能紧张"
+    else:
+        return "🚨 产能严重不足"
+
+df_final["产能状态"] = df_final.apply(lambda x: judge_capacity(x["当月到货产能"], x["当月下单量"]), axis=1)
+
+# 排序：按真实产能从大到小
+df_final = df_final.sort_values("当月到货产能", ascending=False)
+
+# ============== 展示表格 ==============
+st.subheader(f"🏭 {select_month} 厂家产能分析表")
+st.dataframe(
+    df_final.style.format({
+        "当月到货产能": "{:,.0f}",
+        "当月下单量": "{:,.0f}",
+    }),
+    use_container_width=True
+)
+
+# ============== 产能采购决策建议 一行四列 + 占比 =====================
 st.markdown("---")
 st.subheader("💡 采购产能决策建议")
 
-# 先计算到货下单占比
-df_final["到货下单占比%"] = (df_final["当月到货产能"] / df_final["当月下单量"] * 100).round(2)
-# 处理除0异常（无下单时占比不计算）
-df_final.loc[df_final["当月下单量"] == 0, "到货下单占比%"] = 0
+# 先计算占比（修复除0错误）
+df_final["到货下单占比%"] = 0.0  # 先初始化
+mask = df_final["当月下单量"] > 0
+df_final.loc[mask, "到货下单占比%"] = (df_final.loc[mask, "当月到货产能"] / df_final.loc[mask, "当月下单量"] * 100).round(2)
 
-# 按产能状态分组
+# 分组
 cap_groups = df_final.groupby("产能状态")
-# 状态展示顺序
 status_order = ["✅ 产能充足", "⚠️ 产能正常", "🔴 产能紧张", "🚨 产能严重不足"]
 
-# 一行4列布局
+# 一行 4 列
 cols = st.columns(4)
 
 for idx, status in enumerate(status_order):
     with cols[idx]:
+        st.markdown(f"**{status}**")
         if status in cap_groups.groups:
-            st.markdown(f"### {status}")
-            group_df = cap_groups.get_group(status).sort_values("当月到货产能", ascending=False)
-            # 遍历输出，新增占比展示
+            group_df = cap_groups.get_group(status)
             for _, r in group_df.iterrows():
-                factory = r["厂家"]
-                arrive = int(r["当月到货产能"])
-                order = int(r["当月下单量"])
-                ratio = r["到货下单占比%"]
-                st.caption(f"{factory} | 到货{arrive} | 下单{order} | 占比{ratio}%")
+                厂家 = r['厂家']
+                到货 = int(r['当月到货产能'])
+                下单 = int(r['当月下单量'])
+                占比 = r['到货下单占比%']
+                st.caption(f"{厂家}\n到货{到货} | 下单{下单} | {占比}%")
         else:
-            st.markdown(f"### {status}")
-            st.caption("暂无厂家")
+            st.caption("暂无")
 
-# 单独展示无订单厂家（不占用四列主位置）
+# 无订单厂家放下面
 if "⚪ 本月无订单" in cap_groups.groups:
     st.markdown("---")
-    st.subheader("⚪ 本月无下单厂家")
+    st.markdown("**⚪ 本月无订单厂家**")
     no_order_df = cap_groups.get_group("⚪ 本月无订单")
     for _, r in no_order_df.iterrows():
         st.caption(r["厂家"])
