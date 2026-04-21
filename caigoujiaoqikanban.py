@@ -442,9 +442,97 @@ else:
 
     # 底部说明
     st.markdown("---")
-    st.info("""
-    💡 颜色说明：
-    ✅ **绿色（≥90%）** = 优质品类
-    🔸 **橙色（70%~89%）** = 合格品类
-    🔻 **红色（＜70%）** = 短板品类
-    """)
+
+# -------------------------- 以下是新增：4个高级分析维度（直接复制可用） --------------------------
+st.markdown("---")
+st.subheader("📌 新增采购履约分析维度（辅助决策）")
+
+# ==============================================
+# 1. 整体逾期风险大盘预警卡
+# ==============================================
+st.markdown("#### 🔴 整体逾期风险预警")
+total_orders = len(df_current)
+overdue_orders = len(df_current[df_current["交期状态"] == "逾期"])
+overdue_rate = (overdue_orders / total_orders * 100).round(1)
+
+risk_level = "🔴 高风险" if overdue_rate >= 50 else "🟡 中风险" if overdue_rate >= 30 else "🟢 低风险"
+
+col1, col2, col3 = st.columns(3)
+col1.metric("总订单数", f"{total_orders} 单")
+col2.metric("逾期订单数", f"{overdue_orders} 单")
+col3.metric("逾期率 & 风险等级", f"{overdue_rate}% | {risk_level}")
+
+# ==============================================
+# 2. 厂家到货完成率分析（核心：到货量 / 采购量）
+# ==============================================
+st.markdown("---")
+st.markdown("#### 📦 厂家到货完成率排行榜（准时率+到货率双维度）")
+
+factory_kpi = df_current.groupby("厂家").agg(
+    订单数=("采购单号", "count"),
+    准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100),
+    采购量=("采购量", "sum"),
+    到货量=("实际到货量", "sum")
+).reset_index()
+
+factory_kpi["到货完成率"] = (factory_kpi["到货量"] / factory_kpi["采购量"] * 100).round(2)
+factory_kpi["准时率"] = factory_kpi["准时率"].round(1)
+factory_kpi = factory_kpi.sort_values("准时率", ascending=False).reset_index(drop=True)
+
+# 双维度展示表格
+st.dataframe(
+    factory_kpi[["厂家", "订单数", "准时率", "采购量", "到货量", "到货完成率"]],
+    use_container_width=True,
+    hide_index=True
+)
+
+# ==============================================
+# 3. 高危品类 TOP 10（准时率最低，必须整改）
+# ==============================================
+st.markdown("---")
+st.markdown("#### ⚠️ 高危逾期品类 TOP 10（优先管控）")
+
+category_risk = df_current.groupby("厂家类目明细").agg(
+    订单数=("采购单号", "count"),
+    准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
+).reset_index()
+
+category_risk["准时率"] = category_risk["准时率"].round(1)
+category_risk = category_risk.sort_values("准时率").head(10)
+
+st.dataframe(
+    category_risk,
+    use_container_width=True,
+    hide_index=True
+)
+
+# ==============================================
+# 4. 厂家履约综合评分（100分制，采购直接用）
+# ==============================================
+st.markdown("---")
+st.markdown("#### 🏆 厂家履约综合评分（100分制）")
+
+factory_score = df_current.groupby("厂家").agg(
+    订单数=("采购单号", "count"),
+    准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100),
+    采购量=("采购量", "sum"),
+    到货量=("实际到货量", "sum")
+).reset_index()
+
+factory_score["到货完成率"] = factory_score["到货量"] / factory_score["采购量"] * 100
+factory_score["综合评分"] = (factory_score["准时率"] * 0.7 + factory_score["到货完成率"] * 0.3).round(1)
+
+# 评级
+def score_level(score):
+    if score >= 90: return "🟢 优质"
+    elif score >= 80: return "🟡 合格"
+    else: return "🔴 异常"
+
+factory_score["等级"] = factory_score["综合评分"].apply(score_level)
+factory_score = factory_score.sort_values("综合评分", ascending=False)
+
+st.dataframe(
+    factory_score[["厂家", "订单数", "准时率", "到货完成率", "综合评分", "等级"]],
+    use_container_width=True,
+    hide_index=True
+)
