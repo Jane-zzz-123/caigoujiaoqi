@@ -506,50 +506,58 @@ st.dataframe(final_table, use_container_width=True, hide_index=True)
 st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
-# -------------------------- 最终稳定版 · 三列决策卡片 完全不会显示源码 --------------------------
+# -------------------------- 【最终完美版】三列采购决策卡片 · 零报错 --------------------------
 st.markdown("---")
-st.subheader("💡 各品类采购下单决策汇总")
+st.subheader("💡 各品类采购下单建议")
 
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# 批量3列渲染
 for i in range(0, len(cate_list), 3):
     batch = cate_list[i:i+3]
     cols = st.columns(3)
 
-    for idx, (cate, group) in enumerate(batch):
+    for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
-
-            # 厂家数据格式化
-            def fmt_row(r):
-                return f"{r['厂家']} ｜ 订单{int(r['订单数'])} 准时{int(r['准时数'])} 逾期{int(r['逾期数'])} {r['准时率%']}%"
-
-            good_list = group[group["等级"] == "🟢 优质"].apply(fmt_row, axis=1).tolist()
-            ok_list = group[group["等级"] == "🟡 合格"].apply(fmt_row, axis=1).tolist()
-            bad_list = group[group["等级"] == "🔴 异常"].apply(fmt_row, axis=1).tolist()
-
-            # 纯文本+原生markdown排版，彻底告别HTML源码泄露
             with st.container(border=True):
                 st.markdown(f"#### 📦 {cate}")
 
+                # 优质厂家
                 st.markdown("✅ **优先下单优质厂家**")
-                st.write("\n".join(good_list) if good_list else "暂无")
+                good = group_data[group_data["等级"] == "🟢 优质"]
+                if len(good) > 0:
+                    for _, r in good.iterrows():
+                        st.write(f"{r['厂家']} | 订单{int(r['订单数'])} 准时{int(r['准时数'])} 逾期{int(r['逾期数'])} {r['准时率%']}%")
+                else:
+                    st.write("暂无")
 
                 st.divider()
 
+                # 合格厂家
                 st.markdown("⚠️ **合格可控厂家**")
-                st.write("\n".join(ok_list) if ok_list else "暂无")
+                normal = group_data[group_data["等级"] == "🟡 合格"]
+                if len(normal) > 0:
+                    for _, r in normal.iterrows():
+                        st.write(f"{r['厂家']} | 订单{int(r['订单数'])} 准时{int(r['准时数'])} 逾期{int(r['逾期数'])} {r['准时率%']}%")
+                else:
+                    st.write("暂无")
 
                 st.divider()
 
+                # 异常厂家
                 st.markdown("🔴 **谨慎合作异常厂家**")
-                st.write("\n".join(bad_list) if bad_list else "暂无")
+                bad = group_data[group_data["等级"] == "🔴 异常"]
+                if len(bad) > 0:
+                    for _, r in bad.iterrows():
+                        st.write(f"{r['厂家']} | 订单{int(r['订单数'])} 准时{int(r['准时数'])} 逾期{int(r['逾期数'])} {r['准时率%']}%")
+                else:
+                    st.write("暂无")
 
-                # 提示信息
-                if not good_list:
-                    st.warning("💡 该品类暂无优质供应商，建议优化供应结构")
-                if group["厂家数"].iloc[0] == 1:
-                    st.error("🚨 单一供应商，存在断供风险")
+                # 风险提示
+                if len(good) == 0:
+                    st.warning("💡 暂无优质供应商")
+                if group_data["厂家数"].iloc[0] == 1:
+                    st.error("🚨 单一供应商风险")
+
 
 
