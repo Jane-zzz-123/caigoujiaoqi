@@ -443,82 +443,51 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 产品分类×厂家 区分色高亮表格（紧凑清晰版） --------------------------
+# -------------------------- 最终极简不报错版：产品分类×厂家对比表 --------------------------
 st.markdown("---")
-st.subheader("📊 产品分类 × 厂家 履约对比一览（分类底色区分）")
+st.subheader("📊 产品分类 × 厂家 履约对比表")
 
-# 1. 基础数据聚合
-compare_df = df_current.groupby(["产品分类", "厂家"]).agg(
+# 1. 计算数据
+compare_df = df_current.groupby(["产品分类", "厂家"], as_index=False).agg(
     订单数=("采购单号", "count"),
     准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
     逾期数=("交期状态", lambda x: (x == "逾期").sum()),
     平均交期=("实际采购交期", "mean"),
-    采购量合计=("采购量", "sum"),
-).reset_index()
-
-# 2. 计算指标
-compare_df["准时率"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
-
-# 履约等级配色（文字高亮）
-def get_grade(rate):
-    if rate >= 90:
-        return "优质", "color:#16a34a; font-weight:bold;"
-    elif rate >= 80:
-        return "合格", "color:#ca8a04; font-weight:bold;"
-    else:
-        return "异常", "color:#dc2626; font-weight:bold;"
-
-compare_df[["履约等级", "等级样式"]] = compare_df["准时率"].apply(get_grade).apply(pd.Series)
-
-# 统计厂家数量
-cate_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index(name="合作厂家数")
-compare_df = compare_df.merge(cate_count, on="产品分类", how="left")
-
-# 排序：先产品分类，再准时率从差到好
-compare_df = compare_df.sort_values(by=["产品分类", "准时率"], ascending=[True, True]).reset_index(drop=True)
-
-# 3. 核心：给不同产品分类加间隔底色
-category_list = compare_df["产品分类"].unique()
-color_map = {}
-# 相邻分类深浅交替底色
-for idx, cate in enumerate(category_list):
-    if idx % 2 == 0:
-        color_map[cate] = "#f8fafc"
-    else:
-        color_map[cate] = "#ffffff"
-
-compare_df["分类底色"] = compare_df["产品分类"].map(color_map)
-
-# 4. 表格样式渲染
-def style_table(row):
-    base_bg = row["分类底色"]
-    # 整行底色按分类区分
-    row_style = [f"background-color:{base_bg};"] * len(row)
-    # 单独给履约等级列加颜色样式
-    grade_col_idx = row.index.get_loc("履约等级")
-    row_style[grade_col_idx] = row_style[grade_col_idx] + row["等级样式"]
-    return row_style
-
-# 要展示的列（隐藏辅助字段）
-show_cols = [
-    "产品分类","合作厂家数","厂家","准时率","履约等级",
-    "订单数","准时数","逾期数","平均交期","采购量合计"
-]
-
-styled_df = compare_df[show_cols].style.apply(style_table, axis=1)
-
-# 5. 渲染表格
-st.dataframe(
-    styled_df,
-    use_container_width=True,
-    hide_index=True,
-    height=650
+    采购量=("采购量", "sum"),
 )
 
-# 图例说明
-st.markdown("""
-🔍 表格解读：
-1. **相邻产品分类 深浅底色交替**，一眼区分不同品类区块
-2. 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
-3. 合作厂家数=1 = 单一供应商，供应链集中风险高
+compare_df["准时率%"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
+
+# 2. 加等级（文字版，不报错）
+def level(rate):
+    if rate >= 90:
+        return "🟢 优质"
+    elif rate >= 80:
+        return "🟡 合格"
+    else:
+        return "🔴 异常"
+
+compare_df["等级"] = compare_df["准时率%"].apply(level)
+
+# 3. 统计每个分类有几个厂家
+cat_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index()
+cat_count.columns = ["产品分类", "厂家数"]
+compare_df = compare_df.merge(cat_count, on="产品分类")
+
+# 4. 排序
+compare_df = compare_df.sort_values(["产品分类", "准时率%"], ascending=[True, True])
+
+# 5. 直接显示精简表格（绝对稳定）
+final_table = compare_df[[
+    "产品分类", "厂家数", "厂家", "准时率%", "等级",
+    "订单数", "逾期数", "平均交期", "采购量"
+]]
+
+st.dataframe(final_table, use_container_width=True, hide_index=True)
+
+st.info("""
+✅ 极简清晰版：
+• 🟢 优质 / 🟡 合格 / 🔴 异常 → 一眼看履约水平
+• 厂家数 = 1 → 单一供应商，风险高
+• 按产品分类排序，同类产品集中在一起
 """)
