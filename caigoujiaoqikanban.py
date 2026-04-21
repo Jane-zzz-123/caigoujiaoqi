@@ -443,11 +443,11 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 最终极简不报错版：产品分类×厂家对比表 --------------------------
+# -------------------------- 最终完整版：产品分类×厂家对比表 --------------------------
 st.markdown("---")
 st.subheader("📊 产品分类 × 厂家 履约对比表")
 
-# 1. 计算数据
+# 1. 基础数据计算
 compare_df = df_current.groupby(["产品分类", "厂家"], as_index=False).agg(
     订单数=("采购单号", "count"),
     准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
@@ -456,9 +456,19 @@ compare_df = df_current.groupby(["产品分类", "厂家"], as_index=False).agg(
     采购量=("采购量", "sum"),
 )
 
+# 准时率
 compare_df["准时率%"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
 
-# 2. 加等级（文字版，不报错）
+# 平均交期保留2位小数
+compare_df["平均交期"] = compare_df["平均交期"].round(2)
+
+# 2. 计算 【分类采购量占比】
+category_sum = compare_df.groupby("产品分类")["采购量"].sum().reset_index()
+category_sum.columns = ["产品分类", "分类总采购量"]
+compare_df = compare_df.merge(category_sum, on="产品分类")
+compare_df["采购量占比%"] = (compare_df["采购量"] / compare_df["分类总采购量"] * 100).round(2)
+
+# 3. 履约等级
 def level(rate):
     if rate >= 90:
         return "🟢 优质"
@@ -469,25 +479,18 @@ def level(rate):
 
 compare_df["等级"] = compare_df["准时率%"].apply(level)
 
-# 3. 统计每个分类有几个厂家
-cat_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index()
-cat_count.columns = ["产品分类", "厂家数"]
-compare_df = compare_df.merge(cat_count, on="产品分类")
+# 4. 厂家数量
+supplier_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index()
+supplier_count.columns = ["产品分类", "厂家数"]
+compare_df = compare_df.merge(supplier_count, on="产品分类")
 
-# 4. 排序
+# 5. 排序
 compare_df = compare_df.sort_values(["产品分类", "准时率%"], ascending=[True, True])
 
-# 5. 直接显示精简表格（绝对稳定）
+# 6. 最终展示表格
 final_table = compare_df[[
     "产品分类", "厂家数", "厂家", "准时率%", "等级",
-    "订单数", "逾期数", "平均交期", "采购量"
+    "订单数", "逾期数", "平均交期", "采购量", "采购量占比%"
 ]]
 
 st.dataframe(final_table, use_container_width=True, hide_index=True)
-
-st.info("""
-✅ 极简清晰版：
-• 🟢 优质 / 🟡 合格 / 🔴 异常 → 一眼看履约水平
-• 厂家数 = 1 → 单一供应商，风险高
-• 按产品分类排序，同类产品集中在一起
-""")
