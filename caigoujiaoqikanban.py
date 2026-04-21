@@ -562,137 +562,84 @@ for i in range(0, len(cate_list), 3):
                     st.info("💡 暂无优质供方")
                 if group_data["厂家数"].iloc[0] == 1:
                     st.warning("⚠️ 单一供应风险")
-# ====================== 【模块6：单月厂家产能分析】 ======================
+# ====================== 单月厂家产能分析 · 正确版 ======================
 st.markdown("---")
-st.header("📊 单月厂家产能交付分析（核心看板）")
-st.caption("分析逻辑：当月下单量 ⚔️ 当月实际到货量 → 评估产能交付能力与积压风险")
+st.header("📊 单月厂家产能分析（到货VS下单）")
+st.caption("核心逻辑：当月到货量=真实产能 | 当月下单量=订单负荷 | 直接对比评估产能")
 
-# ============== 1. 数据预处理 ==============
-df_cap = df.copy()
+# 数据复制
+df_prod = df.copy()
 
-# 标准化时间字段（确保能提取年月）
-df_cap["下单年月"] = pd.to_datetime(df_cap["下单时间"]).dt.to_period("M")
-df_cap["到货年月"] = pd.to_datetime(df_cap["到货年月"]).dt.to_period("M")
+# 时间标准化
+df_prod["下单年月"] = pd.to_datetime(df_prod["下单时间"]).dt.to_period("M")
+df_prod["到货年月"] = pd.to_datetime(df_prod["到货年月"]).dt.to_period("M")
 
-# 月份选择器
-all_order_months = sorted(df_cap["下单年月"].unique(), reverse=True)
-select_month = st.selectbox("选择要分析的月份", all_order_months)
+# 选择分析月份
+month_list = sorted(df_prod["到货年月"].unique(), reverse=True)
+select_month = st.selectbox("选择分析月份", month_list)
 
-# 筛选数据
-current_month = str(select_month)
-df_month = df_cap.copy()
+# ============== 核心指标计算 ==============
+# 1. 当月到货量 = 真实产能
+df_arrive = df_prod[df_prod["到货年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
+df_arrive.columns = ["厂家", "当月到货产能"]
 
-# ============== 2. 核心产能指标计算 ==============
-# 1. 当月【下单】的采购量（厂家承接产能）
-order_current = df_month[df_month["下单年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
-order_current.rename(columns={"采购量": "当月下单量"}, inplace=True)
+# 2. 当月下单量 = 订单负荷
+df_order = df_prod[df_prod["下单年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
+df_order.columns = ["厂家", "当月下单量"]
 
-# 2. 当月【到货】的采购量（厂家实际产出）
-arrive_current = df_month[df_month["到货年月"] == select_month].groupby("厂家")["采购量"].sum().reset_index()
-arrive_current.rename(columns={"采购量": "当月到货量"}, inplace=True)
+# 3. 合并（全部保留，不删除任何数据）
+df_final = pd.merge(df_arrive, df_order, on="厂家", how="outer").fillna(0)
 
-# 3. 当月到货 → 但【往期下单】的量（消化积压）
-arrive_old = df_month[
-    (df_month["到货年月"] == select_month) &
-    (df_month["下单年月"] < select_month)
-].groupby("厂家")["采购量"].sum().reset_index()
-arrive_old.rename(columns={"采购量": "当月消化往期积压量"}, inplace=True)
-
-# 4. 当月下单 → 但【未当月到货】的量（新增积压）
-order_new_hold = df_month[
-    (df_month["下单年月"] == select_month) &
-    (df_month["到货年月"] > select_month)
-].groupby("厂家")["采购量"].sum().reset_index()
-order_new_hold.rename(columns={"采购量": "当月新增未交付积压"}, inplace=True)
-
-# ============== 3. 合并所有产能数据 ==============
-from functools import reduce
-data_frames = [order_current, arrive_current, arrive_old, order_new_hold]
-capacity_df = reduce(lambda left, right: pd.merge(left, right, on="厂家", how="outer"), data_frames)
-capacity_df = capacity_df.fillna(0)
-
-# 计算核心指标
-capacity_df["当月真实自产交付量"] = capacity_df["当月到货量"] - capacity_df["当月消化往期积压量"]
-capacity_df["当月真实自产交付量"] = capacity_df["当月真实自产交付量"].clip(lower=0)
-
-# 产能交付达成率（真实自产 / 当月下单）
-capacity_df["产能交付达成率%"] = 0.0
-mask = capacity_df["当月下单量"] > 0
-capacity_df.loc[mask, "产能交付达成率%"] = (capacity_df["当月真实自产交付量"] / capacity_df["当月下单量"] * 100).round(2)
-
-# 风险等级判定
-def get_cap_level(rate, order_qty, hold_qty):
-    if order_qty == 0:
-        return "⚪ 无下单"
-    if rate >= 95:
-        return "✅ 产能健康"
-    elif rate >= 80:
-        return "⚠️ 产能偏紧"
-    elif rate >= 60:
-        return "🔴 产能不足"
+# 4. 产能健康度判断（完全按你说的：到货 VS 下单）
+def judge_capacity(arrive, order):
+    if order == 0:
+        return "⚪ 本月无订单"
+    if arrive >= order * 0.9:
+        return "✅ 产能充足"
+    elif arrive >= order * 0.7:
+        return "⚠️ 产能正常"
+    elif arrive >= order * 0.5:
+        return "🔴 产能紧张"
     else:
-        return "🚨 严重积压"
+        return "🚨 产能严重不足"
 
-capacity_df["产能风险等级"] = capacity_df.apply(
-    lambda row: get_cap_level(row["产能交付达成率%"], row["当月下单量"], row["当月新增未交付积压"]), axis=1
-)
+df_final["产能状态"] = df_final.apply(lambda x: judge_capacity(x["当月到货产能"], x["当月下单量"]), axis=1)
 
-# 排序：按当月下单量从大到小
-capacity_df = capacity_df.sort_values("当月下单量", ascending=False).reset_index(drop=True)
+# 排序：按真实产能从大到小
+df_final = df_final.sort_values("当月到货产能", ascending=False)
 
-# ============== 4. 展示产能分析总表 ==============
-show_cols = [
-    "厂家", "产能风险等级", "当月下单量", "当月到货量",
-    "当月真实自产交付量", "当月消化往期积压量", "当月新增未交付积压",
-    "产能交付达成率%"
-]
-
-st.subheader(f"🏭 {current_month} 厂家产能分析总表")
+# ============== 展示表格 ==============
+st.subheader(f"🏭 {select_month} 厂家产能分析表")
 st.dataframe(
-    capacity_df[show_cols].style.format({
+    df_final.style.format({
+        "当月到货产能": "{:,.0f}",
         "当月下单量": "{:,.0f}",
-        "当月到货量": "{:,.0f}",
-        "当月真实自产交付量": "{:,.0f}",
-        "当月消化往期积压量": "{:,.0f}",
-        "当月新增未交付积压": "{:,.0f}",
-        "产能交付达成率%": "{:.2f}%"
     }),
-    use_container_width=True,
-    height=500
+    use_container_width=True
 )
 
-# ============== 5. 产能决策总结（三列精简版） ==============
+# ============== 三列产能结论 =====================
 st.markdown("---")
-st.subheader("💡 产能采购决策建议")
+st.subheader("💡 采购产能决策建议")
 
-cap_groups = capacity_df.groupby("产能风险等级")
-level_order = ["✅ 产能健康", "⚠️ 产能偏紧", "🔴 产能不足", "🚨 严重积压", "⚪ 无下单"]
-
-# 三列布局
+groups = df_final.groupby("产能状态")
 cols = st.columns(3)
 idx = 0
 
-for level in level_order:
-    if level in cap_groups.groups:
-        df_level = cap_groups.get_group(level)
+for status in ["✅ 产能充足", "⚠️ 产能正常", "🔴 产能紧张", "🚨 产能严重不足", "⚪ 本月无订单"]:
+    if status in groups.groups:
         with cols[idx % 3]:
-            st.markdown(f"### {level}")
-            for _, row in df_level.iterrows():
-                sup = row["厂家"]
-                order = int(row["当月下单量"])
-                arrive = int(row["当月真实自产交付量"])
-                rate = row["产能交付达成率%"]
-                hold = int(row["当月新增未交付积压"])
-                st.caption(f"{sup} | 下单{order} | 交付{arrive} | 达成率{rate:.1f}% | 积压{hold}")
+            st.markdown(f"### {status}")
+            for _, row in groups.get_group(status).iterrows():
+                st.caption(f"{row['厂家']} | 到货{int(row['当月到货产能'])} | 下单{int(row['当月下单量'])}")
             idx += 1
 
-# ============== 6. 关键说明 ==============
 st.info("""
-✅ **指标说明**
-1. 当月下单量：厂家本月承接的订单量
-2. 当月真实自产交付量：本月生产交付的真实产能（不含消化往期积压）
-3. 产能交付达成率：真实产能 / 当月下单（越高越健康）
-4. 新增未交付积压：本月下单但未交付，会延期到后续月份
+✅ 核心说明（完全按业务逻辑）
+1. 当月到货产能 = 厂家真实月度产能
+2. 当月下单量 = 当月给厂家的订单量
+3. 对比两者 = 最真实、最准确、最无偏见的产能分析
+4. 交期10/20/30天不影响，全部尊重实际到货
 """)
 
 
