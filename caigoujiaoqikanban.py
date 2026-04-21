@@ -443,80 +443,69 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 产品分类 - 厂家准时率对比分析 --------------------------
+# -------------------------- 【优化版】产品分类-厂家全局履约对比总表 --------------------------
 st.markdown("---")
-st.subheader("📊 产品分类 → 各厂家履约对比（辅助采购分配订单）")
+st.subheader("📊 产品分类 × 厂家 全局履约一览（一眼纵观）")
 
-# 1. 按【产品分类 + 厂家】聚合计算
+# 1. 基础聚合计算
 compare_df = df_current.groupby(["产品分类", "厂家"]).agg(
     订单数=("采购单号", "count"),
     准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
     逾期数=("交期状态", lambda x: (x == "逾期").sum()),
     平均交期=("实际采购交期", "mean"),
-    采购量=("采购量", "sum"),
+    采购量合计=("采购量", "sum"),
 ).reset_index()
 
-# 计算准时率
+# 计算准时率、评级
 compare_df["准时率"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
 
-# 2. 按分类遍历，展示每个分类下的厂家对比
-category_list = sorted(df_current["产品分类"].unique())
-
-for cate in category_list:
-    cate_data = compare_df[compare_df["产品分类"] == cate].copy()
-
-    # 标题：显示当前分类 + 厂家数量
-    supplier_count = len(cate_data)
-    st.markdown(f"#### 📦 {cate}（共 {supplier_count} 家供应商）")
-
-    # 只有1家的情况 → 简单卡片展示
-    if supplier_count == 1:
-        row = cate_data.iloc[0]
-        rate = row["准时率"]
-
-        # 配色
-        if rate >= 90:
-            bg = "#f0fdf4"
-            level = "优质"
-        elif rate >= 80:
-            bg = "#fffbeb"
-            level = "合格"
-        else:
-            bg = "#fef2f2"
-            level = "异常"
-
-        st.markdown(f"""
-        <div style='padding:12px; background:{bg}; border-radius:8px; margin-bottom:15px;'>
-        🏭 厂家：{row['厂家']}【{level}】<br>
-        📊 准时率：{rate}%　|　订单：{int(row['订单数'])} 单<br>
-        ⏱ 平均交期：{row['平均交期']:.1f} 天　|　采购量：{int(row['采购量'])}
-        </div>
-        """, unsafe_allow_html=True)
-
-    # 2家及以上 → 横向对比展示（核心功能）
+def get_rate_level(rate):
+    if rate >= 90:
+        return "🟢 优质", "优质"
+    elif rate >= 80:
+        return "🟡 合格", "合格"
     else:
-        cols = st.columns(supplier_count)
-        for i, (_, row) in enumerate(cate_data.iterrows()):
-            rate = row["准时率"]
-            if rate >= 90:
-                bg = "#f0fdf4"
-                level = "🟢 优质"
-            elif rate >= 80:
-                bg = "#fffbeb"
-                level = "🟡 合格"
-            else:
-                bg = "#fef2f2"
-                level = "🔴 异常"
+        return "🔴 异常", "异常"
 
-            with cols[i]:
-                st.markdown(f"""
-                <div style='padding:12px; background:{bg}; border-radius:8px; margin-bottom:15px;'>
-                🏭 {row['厂家']}<br>
-                <b>{level}</b><br>
-                准时率：{rate}%<br>
-                订单：{int(row['订单数'])} 单<br>
-                平均交期：{row['平均交期']:.1f}天
-                </div>
-                """, unsafe_allow_html=True)
+compare_df[["履约等级标签","履约评级"]] = compare_df["准时率"].apply(lambda x: get_rate_level(x)).apply(pd.Series)
 
-    st.markdown("---")
+# 2. 统计该品类合作厂家数量
+cate_supplier_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index(name="合作厂家数")
+compare_df = compare_df.merge(cate_supplier_count, on="产品分类", how="left")
+
+# 3. 排序：优先 异常准时率 → 同品类单厂家优先暴露风险
+compare_df = compare_df.sort_values(
+    by=["准时率","合作厂家数"],
+    ascending=[True, True]
+).reset_index(drop=True)
+
+# 4. 表格列整理
+display_table = compare_df[[
+    "产品分类","合作厂家数","厂家","准时率","履约等级标签",
+    "订单数","准时数","逾期数","平均交期","采购量合计"
+]].copy()
+
+# 5. 表格条件上色函数
+def color_rank(row):
+    if row['履约评级'] == "优质":
+        return ['background-color:#f0fdf4']*len(row)
+    elif row['履约评级'] == "合格":
+        return ['background-color:#fffbeb']*len(row)
+    else:
+        return ['background-color:#fef2f2']*len(row)
+
+# 6. 渲染紧凑高亮表格
+st.dataframe(
+    display_table.style.apply(color_rank, axis=1),
+    use_container_width=True,
+    hide_index=True,
+    height=600
+)
+
+# 7. 辅助结论提示（一眼看懂）
+st.info("""
+💡 快速解读指南：
+1. 🔴 红色行 = 履约异常高危，优先整改/开发备选供应商
+2. 合作厂家数=1 = 该品类单一供应商，断供风险极高
+3. 表格默认准时率从低到高排序，最差品类全部置顶
+""")
