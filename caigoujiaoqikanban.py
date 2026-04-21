@@ -506,14 +506,14 @@ st.dataframe(final_table, use_container_width=True, hide_index=True)
 st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
-# -------------------------- 极致紧凑 · 三列采购总结 --------------------------
+# -------------------------- 定制字段格式 · 紧凑三列决策卡片 --------------------------
 st.markdown("---")
-st.subheader("💡 品类下单速览建议")
+st.subheader("💡 各品类采购下单建议")
 
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# 每3个品类一行紧凑排版
+# 3列循环排版
 for i in range(0, len(cate_list), 3):
     batch = cate_list[i:i+3]
     cols = st.columns(3)
@@ -521,34 +521,47 @@ for i in range(0, len(cate_list), 3):
     for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
             with st.container(border=True):
+                # 品类标题
                 st.markdown(f"**📦 {cate}**")
 
-                # 优质厂家
-                good = group_data[group_data["等级"] == "🟢 优质"]
-                if not good.empty:
+                # 1. 优质厂家
+                good_df = group_data[group_data["等级"] == "🟢 优质"]
+                if not good_df.empty:
                     st.success("✅ 优先下单")
-                    for _, r in good.iterrows():
-                        st.caption(f"{r['厂家']} | {int(r['订单数'])}单 | {r['准时率%']}%")
+                    for _, r in good_df.iterrows():
+                        st.caption(
+                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
+                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
+                            f"准时率：{r['准时率%']}%"
+                        )
 
-                # 合格厂家
-                normal = group_data[group_data["等级"] == "🟡 合格"]
-                if not normal.empty:
+                # 2. 合格厂家
+                normal_df = group_data[group_data["等级"] == "🟡 合格"]
+                if not normal_df.empty:
                     st.warning("⚠️ 适量下单")
-                    for _, r in normal.iterrows():
-                        st.caption(f"{r['厂家']} | {int(r['订单数'])}单 | {r['准时率%']}%")
+                    for _, r in normal_df.iterrows():
+                        st.caption(
+                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
+                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
+                            f"准时率：{r['准时率%']}%"
+                        )
 
-                # 异常厂家
-                bad = group_data[group_data["等级"] == "🔴 异常"]
-                if not bad.empty:
+                # 3. 异常厂家
+                bad_df = group_data[group_data["等级"] == "🔴 异常"]
+                if not bad_df.empty:
                     st.error("🔴 严控订单")
-                    for _, r in bad.iterrows():
-                        st.caption(f"{r['厂家']} | {int(r['订单数'])}单 | {r['准时率%']}%")
+                    for _, r in bad_df.iterrows():
+                        st.caption(
+                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
+                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
+                            f"准时率：{r['准时率%']}%"
+                        )
 
-                # 极简风险提示
-                if good.empty:
-                    st.info("暂无优质供方")
+                # 底部风险提示
+                if good_df.empty:
+                    st.info("💡 暂无优质供方")
                 if group_data["厂家数"].iloc[0] == 1:
-                    st.warning("⚠️ 单一供应")
+                    st.warning("⚠️ 单一供应风险")
 
 
 
