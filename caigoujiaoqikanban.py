@@ -23,7 +23,7 @@ def load_data():
         df = pd.read_excel(excel_file, sheet_name="源数据")
 
         need_cols = [
-            "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "待到货量",
+            "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
             "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家",
             "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值"
         ]
@@ -336,7 +336,7 @@ for idx, row in factory_analysis.iterrows():
             </div>
         </div>
         """, unsafe_allow_html=True)
-        
+
 st.markdown("---")
 st.subheader("🏷️ 厂家 - 全品类明细履约分析（按准时率自动评级上色）")
 
