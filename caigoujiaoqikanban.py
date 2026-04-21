@@ -564,86 +564,145 @@ for i in range(0, len(cate_list), 3):
                     st.warning("⚠️ 单一供应风险")
 
 
-# ====================== 厂家预计产能 & 订单放量对比分析 ======================
+# ====================== 厂家多维度产能&订单放量综合对比 ======================
 st.markdown("---")
-st.header("🏭 厂家预计产能 & 当月订单放量对比")
-st.caption("预计产能 = 厂家近N个月平均到货量（真实产出能力）")
+st.header("🏭 厂家多维度产能预估 & 当月订单放量对比")
+st.caption("多基准产能同时参考，杜绝单一口径失真，全面评估订单承载能力")
 
-df_ana = df.copy()
+df_final = df.copy()
 
-# 时间处理
-df_ana["下单年月"] = pd.to_datetime(df_ana["下单时间"]).dt.to_period("M")
-df_ana["到货年月"] = pd.to_datetime(df_ana["到货年月"]).dt.to_period("M")
+# 时间标准化
+df_final["下单年月"] = pd.to_datetime(df_final["下单时间"]).dt.to_period("M")
+df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period("M")
 
-# 1. 选择要对比的月份（你给订单的那个月）
-month_list = sorted(df_ana["下单年月"].unique(), reverse=True)
-selected_month = st.selectbox("选择订单月份", month_list)
+# 1. 仅保留选择订单月份下拉
+all_order_month = sorted(df_final["下单年月"].unique(), reverse=True)
+selected_order_month = st.selectbox("选择订单评估月份", all_order_month)
 
-# 2. 选择预计产能计算口径
-cap_option = st.selectbox("预计产能计算口径", ["近3个月平均", "近6个月平均", "近12个月平均"])
-n = {"近3个月平均":3, "近6个月平均":6, "近12个月平均":12}[cap_option]
+# 2. 以选中月份为终点，固定倒推周期
+target_end_month = selected_order_month
 
-# 3. 以【选中月份】为终点，往前推 N 个月算平均产能（真正的预计产能）
-start_period = selected_month - (n - 1)
-period_range = pd.period_range(start=start_period, end=selected_month, freq="M")
+# 生成对应周期区间
+current_single = pd.period_range(start=target_end_month, end=target_end_month, freq='M')
+last3_range = pd.period_range(start=target_end_month-2, end=target_end_month, freq='M')
+last6_range = pd.period_range(start=target_end_month-5, end=target_end_month, freq='M')
+last12_range = pd.period_range(start=target_end_month-11, end=target_end_month, freq='M')
 
-# 厂家预计月产能（真实历史平均产出）
-cap_df = df_ana[df_ana["到货年月"].isin(period_range)] \
-    .groupby("厂家")["采购量"].mean().round(0).reset_index()
-cap_df.columns = ["厂家", "预计月产能"]
+# 通用按周期聚合到货量函数
+def calc_cap(period_range):
+    temp = df_final[df_final["到货年月"].isin(period_range)]
+    # 先算每个厂家每个月的月度到货
+    monthly = temp.groupby(["厂家","到货年月"])["采购量"].sum().reset_index()
+    # 汇总总量、平均值、历史最高单月产能
+    total = monthly.groupby("厂家")["采购量"].sum()
+    avg = monthly.groupby("厂家")["采购量"].mean().round(0)
+    max_cap = monthly.groupby("厂家")["采购量"].max()
+    return total.reset_index(), avg.reset_index(), max_cap.reset_index()
 
-# 4. 当月你给这个厂家下了多少单
-order_df = df_ana[df_ana["下单年月"] == selected_month] \
+# 计算各口径产能
+_, current_month_cap, _ = calc_cap(current_single)
+current_month_cap.columns = ["厂家", "当月实际产能"]
+
+_, avg_3_cap, _ = calc_cap(last3_range)
+avg_3_cap.columns = ["厂家", "近3个月平均产能"]
+
+_, avg_6_cap, _ = calc_cap(last6_range)
+avg_6_cap.columns = ["厂家", "近半年平均产能"]
+
+_, avg_12_cap, max_all_cap = calc_cap(last12_range)
+avg_12_cap.columns = ["厂家", "近一年平均产能"]
+max_all_cap.columns = ["厂家", "历史最高单月产能"]
+
+# 3. 当月订单放量
+current_order = df_final[df_final["下单年月"] == selected_order_month]\
     .groupby("厂家")["采购量"].sum().reset_index()
-order_df.columns = ["厂家", "当月订单放量"]
+current_order.columns = ["厂家", "当月订单放量"]
 
-# 5. 合并对比
-result = pd.merge(cap_df, order_df, on="厂家", how="outer").fillna(0)
+# 4. 合并所有产能维度
+from functools import reduce
+cap_list = [current_month_cap, avg_3_cap, avg_6_cap, avg_12_cap, max_all_cap, current_order]
+all_df = reduce(lambda left,right: pd.merge(left,right,on="厂家",how="outer"), cap_list)
+all_df = all_df.fillna(0)
 
-# 6. 简单对比判断（最直观）
-def compare_capacity(cap, order):
-    if cap == 0:
-        return "⚪ 无历史产能"
-    if order <= cap * 0.7:
-        return "✅ 订单偏少，可加量"
-    elif order <= cap * 1.0:
+# 5. 核心对比：优先用历史最高产能做承载判定（最合理、防低估）
+all_df["参考承载基准产能"] = all_df["历史最高单月产能"]
+
+# 计算负载率
+all_df["产能负载利用率%"] = 0.0
+valid_mask = all_df["参考承载基准产能"] > 0
+all_df.loc[valid_mask, "产能负载利用率%"] = (
+    all_df.loc[valid_mask, "当月订单放量"] / all_df.loc[valid_mask, "参考承载基准产能"] *100
+).round(2)
+
+# 6. 匹配度判定（合理区间，杜绝夸张误判）
+def match_judge(rate):
+    if rate <=70:
+        return "✅ 产能充足，可大量加单"
+    elif rate <=100:
         return "🟢 订单合理，健康匹配"
-    elif order <= cap * 1.2:
-        return "⚠️ 订单偏多，压力偏大"
+    elif rate <=120:
+        return "⚠️ 订单略超，交付有一定压力"
     else:
-        return "🔴 订单超产能，极易延期"
+        return "🔴 远超峰值产能，极易大面积延期"
 
-result["订单与产能匹配度"] = result.apply(lambda x: compare_capacity(x["预计月产能"], x["当月订单放量"]), axis=1)
+all_df["订单承载分析结论"] = all_df["产能负载利用率%"].apply(match_judge)
 
-# 排序
-result = result.sort_values("预计月产能", ascending=False).reset_index(drop=True)
+# 排序（负载风险从高到低）
+all_df = all_df.sort_values("产能负载利用率%", ascending=False).reset_index(drop=True)
 
-# 展示
+# 7. 表格完整展示
+show_columns = [
+    "厂家",
+    "当月实际产能",
+    "近3个月平均产能",
+    "近半年平均产能",
+    "近一年平均产能",
+    "历史最高单月产能",
+    "当月订单放量",
+    "产能负载利用率%",
+    "订单承载分析结论"
+]
+
+st.subheader(f"📊 {selected_order_month} 厂家产能&订单综合对比")
 st.dataframe(
-    result.style.format({
-        "预计月产能": "{:,.0f}",
-        "当月订单放量": "{:,.0f}"
+    all_df[show_columns].style.format({
+        "当月实际产能": "{:,.0f}",
+        "近3个月平均产能": "{:,.0f}",
+        "近半年平均产能": "{:,.0f}",
+        "近一年平均产能": "{:,.0f}",
+        "历史最高单月产能": "{:,.0f}",
+        "当月订单放量": "{:,.0f}",
+        "产能负载利用率%": "{:.2f}%"
     }),
-    use_container_width=True
+    use_container_width=True,
+    height=600
 )
 
-# 一行四列卡片
+# 8. 一行四列 最终决策指引
 st.markdown("---")
-st.subheader("💡 订单放量建议")
-status_order = [
-    "✅ 订单偏少，可加量",
+st.subheader("💡 采购订单放量决策指引")
+status_sort = [
+    "🔴 远超峰值产能，极易大面积延期",
+    "⚠️ 订单略超，交付有一定压力",
     "🟢 订单合理，健康匹配",
-    "⚠️ 订单偏多，压力偏大",
-    "🔴 订单超产能，极易延期"
+    "✅ 产能充足，可大量加单"
 ]
 cols = st.columns(4)
-groups = result.groupby("订单与产能匹配度")
+status_group = all_df.groupby("订单承载分析结论")
 
-for i, status in enumerate(status_order):
-    with cols[i]:
+for idx, status in enumerate(status_sort):
+    with cols[idx]:
         st.markdown(f"**{status}**")
-        if status in groups.groups:
-            for _, r in groups.get_group(status).iterrows():
-                st.caption(f"{r['厂家']} | 产能{int(r['预计月产能'])} | 订单{int(r['当月订单放量'])}")
+        if status in status_group.groups:
+            for _, row in status_group.get_group(status).iterrows():
+                st.caption(f"{row['厂家']} | 负载 {row['产能负载利用率%']:.0f}%")
         else:
-            st.caption("暂无")
+            st.caption("暂无厂家")
+
+# 口径说明
+st.info("""
+📌 口径说明：
+1. 所有产能均以所选评估月份为终点，严格往前倒推统计
+2. 参考承载基准 = 厂家历史最高单月产出（真实极限能力）
+3. 负载率 = 当月订单 ÷ 历史最高产能，公平防低估
+""")
