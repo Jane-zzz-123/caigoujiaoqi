@@ -506,72 +506,50 @@ st.dataframe(final_table, use_container_width=True, hide_index=True)
 st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
-# -------------------------- 修复版：三列并排 · 品类采购决策总结 --------------------------
+# -------------------------- 最终稳定版 · 三列决策卡片 完全不会显示源码 --------------------------
 st.markdown("---")
 st.subheader("💡 各品类采购下单决策汇总")
 
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# 3列布局循环
+# 批量3列渲染
 for i in range(0, len(cate_list), 3):
-    batch = cate_list[i:i + 3]
+    batch = cate_list[i:i+3]
     cols = st.columns(3)
 
-    for idx, (cate, group_data) in enumerate(batch):
+    for idx, (cate, group) in enumerate(batch):
         with cols[idx]:
 
-            # 格式化厂家数据
-            def fmt_sup(df_sub):
-                res = []
-                for _, r in df_sub.iterrows():
-                    # 格式：厂家名<br>订单数|准时数|逾期数|准时率
-                    txt = f"{r['厂家']}<br>订单{int(r['订单数'])}｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
-                    res.append(txt)
-                return res
+            # 厂家数据格式化
+            def fmt_row(r):
+                return f"{r['厂家']} ｜ 订单{int(r['订单数'])} 准时{int(r['准时数'])} 逾期{int(r['逾期数'])} {r['准时率%']}%"
 
+            good_list = group[group["等级"] == "🟢 优质"].apply(fmt_row, axis=1).tolist()
+            ok_list = group[group["等级"] == "🟡 合格"].apply(fmt_row, axis=1).tolist()
+            bad_list = group[group["等级"] == "🔴 异常"].apply(fmt_row, axis=1).tolist()
 
-            good = fmt_sup(group_data[group_data["等级"] == "🟢 优质"])
-            normal = fmt_sup(group_data[group_data["等级"] == "🟡 合格"])
-            bad = fmt_sup(group_data[group_data["等级"] == "🔴 异常"])
+            # 纯文本+原生markdown排版，彻底告别HTML源码泄露
+            with st.container(border=True):
+                st.markdown(f"#### 📦 {cate}")
 
-            sup_cnt = group_data["厂家数"].iloc[0]
-            single_flag = sup_cnt == 1
+                st.markdown("✅ **优先下单优质厂家**")
+                st.write("\n".join(good_list) if good_list else "暂无")
 
-            # 核心修复：使用正确的 HTML 格式，加上背景色和内边距
-            html_content = f"""
-<div style="padding:14px; border-radius:10px; border:1px solid #e5e7eb; background:#ffffff;">
-    <h5 style="margin:0 0 10px 0; font-size:16px;">📦 {cate}</h5>
+                st.divider()
 
-    <p style="margin:6px 0;"><b>✅ 优先下单优质厂家</b></p>
-    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(good) if good else '暂无'}</p>
+                st.markdown("⚠️ **合格可控厂家**")
+                st.write("\n".join(ok_list) if ok_list else "暂无")
 
-    <hr style="margin:8px 0; border-top: 1px dashed #eee;">
+                st.divider()
 
-    <p style="margin:6px 0;"><b>⚠️ 合格可控厂家</b></p>
-    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(normal) if normal else '暂无'}</p>
+                st.markdown("🔴 **谨慎合作异常厂家**")
+                st.write("\n".join(bad_list) if bad_list else "暂无")
 
-    <hr style="margin:8px 0; border-top: 1px dashed #eee;">
+                # 提示信息
+                if not good_list:
+                    st.warning("💡 该品类暂无优质供应商，建议优化供应结构")
+                if group["厂家数"].iloc[0] == 1:
+                    st.error("🚨 单一供应商，存在断供风险")
 
-    <p style="margin:6px 0;"><b>🔴 谨慎合作异常厂家</b></p>
-    <p style="margin:4px 0; font-size:13px; line-height:1.5;">{'<br>'.join(bad) if bad else '暂无'}</p>
-"""
-            # 追加：暂无优质供应商的黄色高亮提示（修复代码）
-            if not good:
-                html_content += """
-    <div style="margin-top:10px; padding:8px; background-color:#fffbeb; color:#b45309; border-radius:6px; font-weight:bold; font-size:13px;">
-        💡 该品类暂无优质供应商，建议优化供应结构
-    </div>
-"""
-            # 追加：单一供应商风险提示（红色高亮）
-            if single_flag:
-                html_content += """
-    <div style="margin-top:10px; padding:8px; background-color:#fef2f2; color:#dc2626; border-radius:6px; font-weight:bold; font-size:13px;">
-        🚨 高风险提醒：独家单一供应商
-    </div>
-"""
-            # 闭合 div 标签
-            html_content += "</div>"
-
-            st.markdown(html_content, unsafe_allow_html=True)
 
