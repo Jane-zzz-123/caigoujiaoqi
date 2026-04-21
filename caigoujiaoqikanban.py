@@ -564,83 +564,84 @@ for i in range(0, len(cate_list), 3):
                     st.warning("⚠️ 单一供应风险")
 
 
-# ====================== 单月厂家真实产能分析（最终正确版） ======================
+# ====================== 最终实用版 厂家产能分析看板 ======================
 st.markdown("---")
-st.header("🏭 单月厂家真实产能分析")
-st.caption("标准定义：厂家月度产能 = 当月实际到货量（不受交期影响）")
+st.header("🏭 厂家产能负载&下单承载力分析")
+st.caption("核心目的：判断厂家当前能不能再接新订单，避免大面积逾期")
 
-df_copy = df.copy()
-
+df_cap_final = df.copy()
 # 时间标准化
-df_copy["到货年月"] = pd.to_datetime(df_copy["到货年月"]).dt.to_period("M")
-df_copy["下单年月"] = pd.to_datetime(df_copy["下单时间"]).dt.to_period("M")
+df_cap_final["到货年月"] = pd.to_datetime(df_cap_final["到货年月"]).dt.to_period("M")
+df_cap_final["下单年月"] = pd.to_datetime(df_cap_final["下单时间"]).dt.to_period("M")
 
-# 选择月份
-month_list = sorted(df_copy["到货年月"].unique(), reverse=True)
-select_month = st.selectbox("选择分析月份", month_list)
+# 1. 选择当月
+all_month = sorted(df_cap_final["下单年月"].unique(), reverse=True)
+selected_month = st.selectbox("选择要评估下单承载力的月份", all_month)
 
-# -------------------- 1. 当月真实产能（到货量） --------------------
-df_current = df_copy[df_copy["到货年月"] == select_month].copy()
-capacity = df_current.groupby("厂家")["采购量"].sum().reset_index()
-capacity.columns = ["厂家", "月度真实产能"]
+# 2. 计算厂家长期基准产能（近6个月正常到货水平）
+recent_6_month = sorted(df_cap_final["到货年月"].unique())[-6:]
+base_cap = df_cap_final[df_cap_final["到货年月"].isin(recent_6_month)]\
+    .groupby(["厂家", "到货年月"])["采购量"].sum()\
+    .reset_index().groupby("厂家")["采购量"].mean().reset_index()
+base_cap.columns = ["厂家", "厂家月度基准产能"]
 
-# -------------------- 2. 近3个月平均产能（判断产能趋势） --------------------
-all_months = sorted(df_copy["到货年月"].unique())
-if select_month in all_months:
-    idx = all_months.index(select_month)
-    history_months = all_months[max(0, idx-2) : idx+1]
-    df_history = df_copy[df_copy["到货年月"].isin(history_months)]
-    hist_avg = df_history.groupby("厂家")["采购量"].mean().reset_index()
-    hist_avg.columns = ["厂家", "近3月平均产能"]
-else:
-    hist_avg = df_copy.groupby("厂家")["采购量"].mean().reset_index()
-    hist_avg.columns = ["厂家", "近3月平均产能"]
+# 3. 当月实际下单负载
+current_load = df_cap_final[df_cap_final["下单年月"] == selected_month]\
+    .groupby("厂家")["采购量"].sum().reset_index()
+current_load.columns = ["厂家", "当月下单总负载"]
 
-# -------------------- 3. 合并 --------------------
-result = pd.merge(capacity, hist_avg, on="厂家", how="left").fillna(0)
+# 4. 合并计算
+final_df = pd.merge(base_cap, current_load, on="厂家", how="outer").fillna(0)
 
-# -------------------- 4. 产能状态判断 --------------------
-def get_status(current, avg):
-    if avg == 0:
-        return "⚪ 新供方/无历史"
-    ratio = current / avg
-    if ratio >= 0.9:
-        return "✅ 产能稳定"
-    elif ratio >= 0.7:
-        return "⚠️ 产能略降"
-    elif ratio >= 0.5:
-        return "🔴 产能下滑"
+# 5. 产能负载率 + 状态判定
+final_df = final_df[final_df["厂家月度基准产能"] > 0].reset_index(drop=True)
+final_df["产能负载利用率%"] = (final_df["当月下单总负载"] / final_df["厂家月度基准产能"] * 100).round(2)
+
+def capacity_status(rate):
+    if rate <= 70:
+        return "✅ 产能富余，可大量加单"
+    elif rate <= 100:
+        return "⚠️ 产能饱满，少量谨慎加单"
+    elif rate <= 130:
+        return "🔴 产能过载，严禁新增订单"
     else:
-        return "🚨 产能异常"
+        return "🚨 严重超负荷，立刻分流订单"
 
-result["产能状态"] = result.apply(lambda x: get_status(x["月度真实产能"], x["近3月平均产能"]), axis=1)
+final_df["产能状态&下单建议"] = final_df["产能负载利用率%"].apply(capacity_status)
 
-# -------------------- 5. 表格展示 --------------------
-st.subheader(f"✅ {select_month} 厂家真实产能表")
+# 排序：负载从高到低，高风险优先展示
+final_df = final_df.sort_values("产能负载利用率%", ascending=False).reset_index(drop=True)
+
+# 6. 主表格展示
+st.subheader(f"📊 {selected_month} 厂家下单承载力总览")
 st.dataframe(
-    result.style.format({
-        "月度真实产能": "{:,.0f}",
-        "近3月平均产能": "{:,.0f}",
+    final_df.style.format({
+        "厂家月度基准产能": "{:,.0f}",
+        "当月下单总负载": "{:,.0f}",
+        "产能负载利用率%": "{:.2f}%"
     }),
-    use_container_width=True
+    use_container_width=True,
+    height=450
 )
 
-# -------------------- 6. 一行四列 决策建议 --------------------
+# 7. 一行四列 决策卡片
 st.markdown("---")
-st.subheader("💡 产能决策建议")
-
-groups = result.groupby("产能状态")
-order = ["✅ 产能稳定", "⚠️ 产能略降", "🔴 产能下滑", "🚨 产能异常"]
+st.subheader("💡 分等级采购下单指引")
+status_group = final_df.groupby("产能状态&下单建议")
+status_order = [
+    "✅ 产能富余，可大量加单",
+    "⚠️ 产能饱满，少量谨慎加单",
+    "🔴 产能过载，严禁新增订单",
+    "🚨 严重超负荷，立刻分流订单"
+]
 cols = st.columns(4)
 
-for i, status in enumerate(order):
-    with cols[i]:
+for idx, status in enumerate(status_order):
+    with cols[idx]:
         st.markdown(f"**{status}**")
-        if status in groups.groups:
-            for _, r in groups.get_group(status).iterrows():
-                厂家 = r["厂家"]
-                产能 = int(r["月度真实产能"])
-                平均 = int(r["近3月平均产能"])
-                st.caption(f"{厂家} | 本月{产能} | 月均{平均}")
+        if status in status_group.groups:
+            g_df = status_group.get_group(status)
+            for _, row in g_df.iterrows():
+                st.caption(f"{row['厂家']} | 负载利用率：{row['产能负载利用率%']}%")
         else:
-            st.caption("暂无")
+            st.caption("暂无该类型厂家")
