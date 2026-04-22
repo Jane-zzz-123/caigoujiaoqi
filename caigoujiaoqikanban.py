@@ -511,13 +511,13 @@ else:
     # ==========================================
     # 2️⃣ 厂家逾期卡片（一行3列，高颜值）
     # ====================== 2️⃣ 厂家逾期卡片 + 内嵌采购量热力分布图 ======================
+    # ====================== 厂家逾期详情 终极优化版 ======================
     st.markdown("#### 2. 各厂家逾期详情（高风险优先）")
 
-    # 先预处理全局数据
+    # 预处理转正逾期天数
     overdue_df["逾期正数天数"] = -overdue_df["预计-实际交期的差值"]
 
-    # 风险权重排序
-    factory_max_risk = overdue_df.groupby("厂家")["逾期正数天数"].max().sort_values(ascending=False).index
+    # 全局分层统计
     factory_detail = overdue_df.groupby(["厂家", "逾期等级"]).agg(
         订单数=("采购单号", "count"),
         采购量=("采购量", "sum"),
@@ -525,86 +525,109 @@ else:
     ).reset_index()
     factory_detail["平均逾期显示"] = (-factory_detail["平均逾期原始"]).round(1)
 
+    # 全局总逾期采购量，用于计算占比
+    total_all_purchase = overdue_df["采购量"].sum()
+
+    # 按最长逾期风险排序
+    factory_order = overdue_df.groupby("厂家")["逾期正数天数"].max().sort_values(ascending=False).index
+
     cols = st.columns(3)
     idx = 0
 
-    # 遍历每个厂家生成卡片
-    for fac in factory_max_risk:
-        # 厂家基础汇总
-        fac_all_data = overdue_df[overdue_df["厂家"] == fac]
-        total_over = len(fac_all_data)
-        max_day = fac_all_data["逾期正数天数"].max()
-
-        # 该厂家分层明细
-        sub_detail = factory_detail[factory_detail["厂家"] == fac]
-
-        # 🔥 提前聚合该厂家【逾期天数-采购量】热力数据
-        heat_data = fac_all_data.groupby("逾期正数天数")["采购量"].sum().reset_index()
-        heat_data.columns = ["逾期天数", "逾期采购量"]
-        heat_data = heat_data.sort_values("逾期天数")
-
-        # 卡片底色（整体风险底色不变）
-        max_d = fac_all_data["逾期正数天数"].max()
-        if max_d > 15:
-            card_bg = "#fee2e2"
-            card_border = "#fecaca"
-        elif max_d >7:
-            card_bg = "#ffedd5"
-            card_border = "#fed7aa"
-        elif max_d >3:
-            card_bg = "#fef9c3"
-            card_border = "#fef08a"
+    # 分区间专属渐变色卡
+    def get_heat_color(days):
+        if 1 <= days <=3:
+            # 轻度 绿色渐变
+            return f"rgba(22, 163, 74, {0.4 + days*0.15})"
+        elif 4 <= days <=7:
+            # 中度 橙色渐变
+            return f"rgba(245, 158, 11, {0.4 + (days-3)*0.15})"
+        elif 8 <= days <=15:
+            # 重度 橙红渐变
+            return f"rgba(239, 68, 68, {0.4 + (days-7)*0.08})"
         else:
-            card_bg = "#dcfce7"
-            card_border = "#bbf7d0"
+            # 极度 深红渐变
+            return f"rgba(127, 29, 29, {0.7 + min(days-16, 0.3)})"
 
-        with cols[idx % 3]:
-            # 1. 卡片头部基础信息
+    # 遍历厂家渲染卡片
+    for fac in factory_order:
+        fac_data_all = overdue_df[overdue_df["厂家"] == fac].copy()
+        fac_sub = factory_detail[factory_detail["厂家"] == fac]
+
+        # 厂家基础数据
+        total_order = len(fac_data_all)
+        max_day = fac_data_all["逾期正数天数"].max()
+        fac_total_pur = fac_data_all["采购量"].sum()
+
+        # 卡片整体底色
+        if max_day >15:
+            bg, bd = "#fee2e2", "#fecaca"
+        elif max_day>7:
+            bg, bd = "#ffedd5", "#fed7aa"
+        elif max_day>3:
+            bg, bd = "#fef9c3", "#fde047"
+        else:
+            bg, bd = "#dcfce7", "#bbf7d0"
+
+        with cols[idx %3]:
+            # 卡片头部
             st.markdown(f"""
-            <div style="padding:16px; border-radius:12px; background:{card_bg}; border:1px solid {card_border}; margin-bottom:14px;">
+            <div style="padding:16px; border-radius:12px; background:{bg}; border:1px solid {bd}; margin-bottom:14px;">
             <div style="font-weight:bold; font-size:15px; margin-bottom:6px;">🏭 {fac}</div>
-            <div style="font-size:13px;">逾期订单：{total_over}单｜最长逾期：{max_day}天</div>
+            <div style="font-size:13px;">逾期订单：{total_order}单｜最长逾期：{max_day}天</div>
             """, unsafe_allow_html=True)
 
-            # 2. 分层文字明细
-            color_map_lv = {
+            # 1. 分层明细 + 新增采购量+占比
+            color_lv = {
                 "轻度(1-3天)":"#16a34a",
                 "中度(4-7天)":"#f59e0b",
                 "重度(8-15天)":"#ea580c",
                 "极度(>15天)":"#dc2626"
             }
-            for _, lv_row in sub_detail.iterrows():
-                lv = lv_row["逾期等级"]
-                c = color_map_lv[lv]
+            for _, row in fac_sub.iterrows():
+                lv = row["逾期等级"]
+                cnt = row["订单数"]
+                avg = row["平均逾期显示"]
+                pur = row["采购量"]
+                pct = (pur / fac_total_pur *100).round(2)
+                c = color_lv[lv]
+
                 st.markdown(f"""
-                <div style="font-size:13px; margin:3px 0; color:{c};">
-                {lv}｜{lv_row['订单数']}单｜平均{lv_row['平均逾期显示']}天
+                <div style="font-size:13px; margin:4px 0; color:{c};">
+                {lv}｜{cnt}单｜平均{avg}天（逾期采购量：{pur}，占比{pct}%）
                 </div>
                 """, unsafe_allow_html=True)
 
-            # 3. ✅ 新增：该厂家专属逾期天数-采购量热力条形图
-            st.caption("📈 下方：逾期天数-采购量热力分布")
+            # 2. 定制渐变色热力条形图
+            st.caption("📈 逾期天数-采购量热力分布")
+            heat_df = fac_data_all.groupby("逾期正数天数")["采购量"].sum().reset_index()
+            heat_df.columns = ["逾期天数", "逾期采购量"]
+            heat_df = heat_df.sort_values("逾期天数")
+            # 为每一天匹配专属渐变色
+            heat_df["条形颜色"] = heat_df["逾期天数"].apply(get_heat_color)
+
             import plotly.express as px
             fig = px.bar(
-                heat_data,
+                heat_df,
                 x="逾期天数",
                 y="逾期采购量",
-                color="逾期天数",
-                color_continuous_scale=["#fef08a","#f97316","#dc2626"],
+                color="条形颜色",
+                color_discrete_map="identity",
                 height=150
             )
-            # 迷你紧凑化图表，适配卡片
+            # 图表极简适配卡片
             fig.update_layout(
-                margin=dict(l=0,r=0,t=10,b=0),
+                margin=dict(l=0,r=0,t=8,b=0),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
-                coloraxis_showscale=False
+                showlegend=False
             )
-            fig.update_yaxes(showticklabels=False)
+            fig.update_yaxes(showticklabels=False, title="")
+            fig.update_xaxes(title="逾期天数")
             st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("</div>", unsafe_allow_html=True)
-        idx += 1
+        idx +=1
 
 
 # ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
