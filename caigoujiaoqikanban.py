@@ -1120,24 +1120,39 @@ df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period
 order_months = sorted(df_final["下单年月"].unique(), reverse=True)
 selected_month = st.selectbox("选择订单评估月份", order_months)
 
-# 周期区间（以所选月份为终点倒推）
+# 周期区间
 end_month = selected_month
-# 转为 period 再计算
 end_p = pd.Period(end_month, freq='M')
 p3  = pd.period_range(end_p - 2, end_p, freq='M')
 p6  = pd.period_range(end_p - 5, end_p, freq='M')
 p12 = pd.period_range(end_p - 11, end_p, freq='M')
 
-# 产能计算函数
+# --------------------------
+# 原函数：按【到货】算历史产能（不动）
+# --------------------------
 def get_cap(df, period):
     dfp = df[df["到货年月"].isin(period)]
+    if dfp.empty:
+        return pd.Series(dtype="float64"), pd.Series(dtype="float64")
     monthly = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
     avg_cap = monthly.groupby(level=0).mean().round(0)
     max_cap = monthly.groupby(level=0).max()
     return avg_cap, max_cap
 
+# --------------------------
+# ✅ 新增：按【下单】算当月产能（修复口径）
+# --------------------------
+def get_cap_order(df, period):
+    dfp = df[df["下单年月"].isin(period)]
+    if dfp.empty:
+        return pd.Series(dtype="float64"), pd.Series(dtype="float64")
+    monthly = dfp.groupby(["厂家", "下单年月"])["采购量"].sum()
+    avg_cap = monthly.groupby(level=0).mean().round(0)
+    max_cap = monthly.groupby(level=0).max()
+    return avg_cap, max_cap
+
 # 多口径产能
-cap_now, _       = get_cap(df_final, [end_month])
+cap_now, _       = get_cap_order(df_final, [end_month])  # ✅ 修复
 cap_3m, _        = get_cap(df_final, p3)
 cap_6m, cap_max  = get_cap(df_final, p6)
 cap_12m, _       = get_cap(df_final, p12)
@@ -1149,32 +1164,35 @@ cap_6m    = cap_6m.rename("近半年平均产能（基准）")
 cap_12m   = cap_12m.rename("近一年平均产能")
 cap_max   = cap_max.rename("历史最高单月产能")
 
-# 准时率计算（适配你的两类交期状态）
+# 准时率
 df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
-df_p6["准时标记"] = df_p6["交期状态"].apply(lambda x: 1 if x == "提前/准时" else 0)
-on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
-on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
+if not df_p6.empty:
+    df_p6["准时标记"] = (df_p6["交期状态"] == "提前/准时").astype(int)
+    on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
+    on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
+else:
+    on_time_rate = pd.Series(dtype="float64")
 
 # 当月订单放量
 order_now = df_final[df_final["下单年月"] == selected_month]\
     .groupby("厂家")["采购量"].sum().rename("当月订单放量")
 
-# 合并所有数据
-result = pd.concat([
-    cap_now, cap_3m, cap_6m, cap_12m, cap_max,
-    on_time_rate, order_now
-], axis=1).fillna(0).reset_index()
+# 合并
+result = pd.concat([cap_now, cap_3m, cap_6m, cap_12m, cap_max, on_time_rate, order_now], axis=1).fillna(0).reset_index()
 
-# 核心：安全产能+负载计算（改用近半年平均产能为基准）
+# 安全产能
 result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
 result["产能负载利用率%"] = 0.0
-mask = result["安全可放量产能"] > 0
-result.loc[mask, "产能负载利用率%"] = (
-    result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100
-).round(1)
+mask = (result["安全可放量产能"] > 0)
+result.loc[mask, "产能负载利用率%"] = (result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100).round(1)
 
-# 最终订单建议
-def get_advice(rate):
+# --------------------------
+# ✅ 修复：无数据不报错
+# --------------------------
+def get_advice_safe(row):
+    if row["近半年平均产能（基准）"] == 0:
+        return "⚠️ 暂无历史交付数据，谨慎放量"
+    rate = row["产能负载利用率%"]
     if rate <= 70:
         return "✅ 非常安全，可大幅加单"
     elif rate <= 100:
@@ -1184,9 +1202,9 @@ def get_advice(rate):
     else:
         return "🔴 超载风险高，极易延期"
 
-result["最终订单建议"] = result["产能负载利用率%"].apply(get_advice)
+result["最终订单建议"] = result.apply(get_advice_safe, axis=1)
 
-# 表格展示
+# 展示
 show_cols = [
     "厂家","当月实际产能","近3个月平均产能","近半年平均产能（基准）",
     "近一年平均产能","历史最高单月产能","近半年准时率%",
@@ -1207,7 +1225,7 @@ st.dataframe(
     }), use_container_width=True, height=600
 )
 
-# 一行四列决策卡片
+# 卡片
 st.markdown("---")
 st.subheader("💡 采购放量决策指引")
 status_sort = [
