@@ -611,33 +611,58 @@ def get_delivery_advice(row, date_range):
 quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda x: get_delivery_advice(x, date_range), axis=1)
 
 # 5）卡片：一行4列
+# ✅ 一行4列 紧凑优化版卡片
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
-idx = 0
+card_idx = 0
 
 for _, row in quantile_stats.iterrows():
     factory = row["厂家"]
     cat = row["厂家类目明细"]
-    r = row["准时率"]
-    if r >= 90:
+    current_day = row["当前采购交期均值"]
+    sample = int(row["样本订单数"])
+    rate = row["准时率"]
+    q80 = row["实际交期80分位"]
+    q85 = row["实际交期85分位"]
+    q90 = row["实际交期90分位"]
+    advice = row["采购交期修改建议"]
+
+    # 卡片配色
+    if rate >= 90:
         bg, bd = "#f0fdf4", "#4ade80"
-    elif r >= 80:
+    elif rate >= 80:
         bg, bd = "#fffbeb", "#fbbf24"
     else:
         bg, bd = "#fef2f2", "#f87171"
 
-    with cols[idx % 4]:
+    with cols[card_idx % 4]:
         st.markdown(f"""
-        <div style="padding:16px;border-radius:12px;background:{bg};border:2px solid {bd};margin-bottom:15px;">
-        <div style="font-weight:bold;">🏭 {factory}</div>
-        <div style="font-size:12px;margin-bottom:6px;">📦 {cat}</div>
-        最新采购交期：{row['当前采购交期均值']} 天<br>
-        样本数：{int(row['样本订单数'])} 单｜准时率：{row['准时率']}%<br>
-        90%订单可达成：{row['实际交期90分位']} 天<br>
-        💡 {row['采购交期修改建议']}
+        <div style="padding:14px;border-radius:10px;background:{bg};border:2px solid {bd};margin-bottom:12px;">
+            <div style="font-weight:bold;font-size:16px;margin-bottom:4px;">🏭 {factory}</div>
+            <div style="font-size:13px;color:#555;margin-bottom:6px;">📦 {cat}</div>
+
+            <div style="font-size:14px;line-height:1.5;">
+            <b>最新交期：</b>{current_day}天（准时率{rate}%）<br>
+            <span style="font-size:12px;">统计样本：{sample}单</span>
+            </div>
+
+            <hr style="margin:5px 0;border:none;border-top:1px solid #ddd;">
+
+            <div style="font-size:12px;line-height:1.4;color:#666;">
+            📊 交付参考：<br>
+            &nbsp;&nbsp;80%达成：{q80}天<br>
+            &nbsp;&nbsp;85%达成：{q85}天<br>
+            &nbsp;&nbsp;90%达成：{q90}天
+            </div>
+
+            <hr style="margin:5px 0;border:none;border-top:1px solid #ddd;">
+
+            <div style="font-size:13px;line-height:1.4;">
+            💡 <b>建议：</b>{advice}
+            </div>
         </div>
         """, unsafe_allow_html=True)
-    idx += 1
+    card_idx += 1
 
 # 表格
 st.markdown("#### 📊 交期分位数分析明细表格")
