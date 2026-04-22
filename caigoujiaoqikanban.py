@@ -1191,22 +1191,16 @@ result.loc[mask, "产能负载利用率%"] = (
 ).round(1)
 
 # 订单建议（带无数据兜底）
-# 替换原来的 get_advice 函数
 def get_advice(row):
     base_cap = row["近半年平均产能（基准）"]
     ontime_pct = row["近半年准时率%"]
     load_rate = row["产能负载利用率%"]
-    order_qty = row["当月订单放量"]
 
-    # 兜底1：完全没有历史交付、准时率为0
+    # 最高优先级：无交付保障 → 统一归为一类
     if base_cap <= 0 or ontime_pct <= 5:
         return "🔴 无交付保障，严禁加单"
 
-    # 兜底2：当月有单、但安全产能为0（除以0异常）
-    if row["安全可放量产能"] <= 0 and order_qty > 0:
-        return "🔴 交付能力极差，超载极高风险"
-
-    # 正常负载判定
+    # 正常逻辑
     if load_rate <= 70:
         return "✅ 非常安全，可大幅加单"
     elif load_rate <= 100:
@@ -1215,7 +1209,6 @@ def get_advice(row):
         return "⚠️ 压力偏高，谨慎加单"
     else:
         return "🔴 超载风险高，极易延期"
-
 
 result["最终订单建议"] = result.apply(get_advice, axis=1)
 
@@ -1243,16 +1236,17 @@ st.dataframe(
     }), use_container_width=True, height=600
 )
 
-# 决策卡片
+# 决策卡片 —— 已修复 5 列布局 + 新增高危分组
 st.markdown("---")
 st.subheader("💡 采购放量决策指引")
 status_sort = [
+    "🔴 无交付保障，严禁加单",
     "🔴 超载风险高，极易延期",
     "⚠️ 压力偏高，谨慎加单",
     "🟢 匹配合理，正常发放",
     "✅ 非常安全，可大幅加单"
 ]
-cols = st.columns(4)
+cols = st.columns(5)
 groups = result.groupby("最终订单建议")
 
 for idx, status in enumerate(status_sort):
