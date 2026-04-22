@@ -443,7 +443,6 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
 # ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
 st.markdown("### ⏱ 订单时间筛选设置")
 col1, col2 = st.columns(2)
@@ -464,11 +463,13 @@ with col2:
         index=0
     )
 
-# 核心：根据选择自动计算时间范围
+# 核心：自动计算时间范围（完全适配 数字格式 202503）
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-eval_date = datetime.strptime(str(eval_month), "%Y-%m")
+#  eval_month 是数字 202503，转成字符串再解析
+eval_date = datetime.strptime(str(eval_month), "%Y%m")
+
 if date_range == "仅选择月份":
     start_date = eval_date
     end_date = eval_date
@@ -479,111 +480,17 @@ else:  # 近半年
     start_date = eval_date - relativedelta(months=5)
     end_date = eval_date
 
-# 转换为年月格式
+# 转回数字格式 202503（和你数据完全一致）
 start_month = int(start_date.strftime("%Y%m"))
 end_month = int(end_date.strftime("%Y%m"))
 
-# 筛选出对应时间范围的数据
+# ✅ 终极修复：数字对比数字，绝对不报错
 df_filter = df[
     (df["到货年月"] >= start_month) &
     (df["到货年月"] <= end_month)
     ].copy()
 
 st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
-
-# ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
-st.markdown("### ⏱ 订单时间筛选设置")
-col1, col2 = st.columns(2)
-
-# 筛选1：选择评估基准月份
-with col1:
-    eval_month = st.selectbox(
-        "选择订单评估月份",
-        sorted(df["到货年月"].dropna().unique(), reverse=True),
-        index=0
-    )
-
-# 筛选2：选择数据分析范围
-with col2:
-    date_range = st.selectbox(
-        "数据分析范围",
-        ["仅选择月份", "近三个月", "近半年"],
-        index=0
-    )
-
-# 核心：根据选择自动计算时间范围
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-
-eval_date = datetime.strptime(str(eval_month), "%Y-%m")
-if date_range == "仅选择月份":
-    start_date = eval_date
-    end_date = eval_date
-elif date_range == "近三个月":
-    start_date = eval_date - relativedelta(months=2)
-    end_date = eval_date
-else:  # 近半年
-    start_date = eval_date - relativedelta(months=5)
-    end_date = eval_date
-
-# 转换为年月格式
-start_month = int(start_date.strftime("%Y%m"))
-end_month = int(end_date.strftime("%Y%m"))
-
-# 筛选出对应时间范围的数据
-df_filter = df[
-    (df["到货年月"] >= start_month) &
-    (df["到货年月"] <= end_month)
-    ].copy()
-
-st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
-
-# ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
-st.markdown("### ⏱ 订单时间筛选设置")
-col1, col2 = st.columns(2)
-
-# 筛选1：选择评估基准月份
-with col1:
-    eval_month = st.selectbox(
-        "选择订单评估月份",
-        sorted(df["到货年月"].dropna().unique(), reverse=True),
-        index=0
-    )
-
-# 筛选2：选择数据分析范围
-with col2:
-    date_range = st.selectbox(
-        "数据分析范围",
-        ["仅选择月份", "近三个月", "近半年"],
-        index=0
-    )
-
-# 核心：根据选择自动计算时间范围（字符串格式匹配，不报类型错）
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
-
-eval_date = datetime.strptime(str(eval_month), "%Y-%m")
-if date_range == "仅选择月份":
-    start_date = eval_date
-    end_date = eval_date
-elif date_range == "近三个月":
-    start_date = eval_date - relativedelta(months=2)
-    end_date = eval_date
-else:  # 近半年
-    start_date = eval_date - relativedelta(months=5)
-    end_date = eval_date
-
-# 转换为 字符串格式：YYYY-MM
-start_month_str = start_date.strftime("%Y-%m")
-end_month_str = end_date.strftime("%Y-%m")
-
-# ✅ 这里完全修复：用字符串比较，不再报错
-df_filter = df[
-    (df["到货年月"] >= start_month_str) &
-    (df["到货年月"] <= end_month_str)
-    ].copy()
-
-st.success(f"✅ 已加载：{date_range} | 范围：{start_month_str} ~ {end_month_str} | 订单数：{len(df_filter)} 单")
 
 # -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
 st.markdown("---")
