@@ -510,55 +510,101 @@ else:
 
     # ==========================================
     # 2️⃣ 厂家逾期卡片（一行3列，高颜值）
-    # ==========================================
+    # ====================== 2️⃣ 厂家逾期卡片 + 内嵌采购量热力分布图 ======================
     st.markdown("#### 2. 各厂家逾期详情（高风险优先）")
+
+    # 先预处理全局数据
+    overdue_df["逾期正数天数"] = -overdue_df["预计-实际交期的差值"]
+
+    # 风险权重排序
+    factory_max_risk = overdue_df.groupby("厂家")["逾期正数天数"].max().sort_values(ascending=False).index
     factory_detail = overdue_df.groupby(["厂家", "逾期等级"]).agg(
         订单数=("采购单号", "count"),
-        采购量=("采购量", sum),
-        平均逾期天数=("预计-实际交期的差值", np.mean),
-        最长逾期天数=("预计-实际交期的差值", np.max)
+        采购量=("采购量", "sum"),
+        平均逾期原始=("预计-实际交期的差值", "mean")
     ).reset_index()
-    factory_detail["平均逾期天数"] = factory_detail["平均逾期天数"].round(1)
-    factory_detail["最长逾期天数"] = factory_detail["最长逾期天数"].round(1)
-
-    # 按最严重逾期排序
-    max_days = overdue_df.groupby("厂家")["预计-实际交期的差值"].max().sort_values(ascending=False).index
+    factory_detail["平均逾期显示"] = (-factory_detail["平均逾期原始"]).round(1)
 
     cols = st.columns(3)
     idx = 0
 
-    for fac in max_days:
-        sub = factory_detail[factory_detail["厂家"] == fac]
-        total_order = sub["订单数"].sum()
-        max_day = sub["最长逾期天数"].max()
+    # 遍历每个厂家生成卡片
+    for fac in factory_max_risk:
+        # 厂家基础汇总
+        fac_all_data = overdue_df[overdue_df["厂家"] == fac]
+        total_over = len(fac_all_data)
+        max_day = fac_all_data["逾期正数天数"].max()
+
+        # 该厂家分层明细
+        sub_detail = factory_detail[factory_detail["厂家"] == fac]
+
+        # 🔥 提前聚合该厂家【逾期天数-采购量】热力数据
+        heat_data = fac_all_data.groupby("逾期正数天数")["采购量"].sum().reset_index()
+        heat_data.columns = ["逾期天数", "逾期采购量"]
+        heat_data = heat_data.sort_values("逾期天数")
+
+        # 卡片底色（整体风险底色不变）
+        max_d = fac_all_data["逾期正数天数"].max()
+        if max_d > 15:
+            card_bg = "#fee2e2"
+            card_border = "#fecaca"
+        elif max_d >7:
+            card_bg = "#ffedd5"
+            card_border = "#fed7aa"
+        elif max_d >3:
+            card_bg = "#fef9c3"
+            card_border = "#fef08a"
+        else:
+            card_bg = "#dcfce7"
+            card_border = "#bbf7d0"
 
         with cols[idx % 3]:
+            # 1. 卡片头部基础信息
             st.markdown(f"""
-            <div style="padding:16px; border-radius:12px; background:#fef2f2; border:1px solid #fecaca; margin-bottom:14px;">
+            <div style="padding:16px; border-radius:12px; background:{card_bg}; border:1px solid {card_border}; margin-bottom:14px;">
             <div style="font-weight:bold; font-size:15px; margin-bottom:6px;">🏭 {fac}</div>
-            <div style="font-size:13px;">逾期订单：{total_order}单｜最长逾期：{max_day}天</div>
+            <div style="font-size:13px;">逾期订单：{total_over}单｜最长逾期：{max_day}天</div>
             """, unsafe_allow_html=True)
 
-            for _, row in sub.iterrows():
-                lv = row["逾期等级"]
-                c = "#10b981" if "轻度" in lv else "#f59e0b" if "中度" in lv else "#ef4444"
+            # 2. 分层文字明细
+            color_map_lv = {
+                "轻度(1-3天)":"#16a34a",
+                "中度(4-7天)":"#f59e0b",
+                "重度(8-15天)":"#ea580c",
+                "极度(>15天)":"#dc2626"
+            }
+            for _, lv_row in sub_detail.iterrows():
+                lv = lv_row["逾期等级"]
+                c = color_map_lv[lv]
                 st.markdown(f"""
-                <div style="font-size:12px; margin-top:4px; color:{c};">
-                {row['逾期等级']}｜{row['订单数']}单｜平均{row['平均逾期天数']}天
+                <div style="font-size:13px; margin:3px 0; color:{c};">
+                {lv}｜{lv_row['订单数']}单｜平均{lv_row['平均逾期显示']}天
                 </div>
                 """, unsafe_allow_html=True)
 
+            # 3. ✅ 新增：该厂家专属逾期天数-采购量热力条形图
+            st.caption("📈 下方：逾期天数-采购量热力分布")
+            import plotly.express as px
+            fig = px.bar(
+                heat_data,
+                x="逾期天数",
+                y="逾期采购量",
+                color="逾期天数",
+                color_continuous_scale=["#fef08a","#f97316","#dc2626"],
+                height=150
+            )
+            # 迷你紧凑化图表，适配卡片
+            fig.update_layout(
+                margin=dict(l=0,r=0,t=10,b=0),
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                coloraxis_showscale=False
+            )
+            fig.update_yaxes(showticklabels=False)
+            st.plotly_chart(fig, use_container_width=True)
+
             st.markdown("</div>", unsafe_allow_html=True)
         idx += 1
-
-    # ==========================================
-    # 3️⃣ 高风险厂家 TOP 图
-    # ==========================================
-    st.markdown("#### 3. 高风险厂家 TOP 榜单")
-    top10 = overdue_df.groupby("厂家")["预计-实际交期的差值"].max().round(1).sort_values(ascending=False).head(10).reset_index()
-    fig = px.bar(top10, y="厂家", x="预计-实际交期的差值", color="预计-实际交期的差值",
-                 color_continuous_scale=["#f59e0b", "#ef4444"], orientation="h")
-    st.plotly_chart(fig, use_container_width=True)
 
 
 # ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
