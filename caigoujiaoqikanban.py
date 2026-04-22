@@ -612,6 +612,7 @@ quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda x: get_
 
 # 5）卡片：一行4列
 # ✅ 一行4列 紧凑优化版卡片
+# ✅ 修复乱码 + 紧凑美观 一行4列卡片
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
 card_idx = 0
@@ -627,41 +628,41 @@ for _, row in quantile_stats.iterrows():
     q90 = row["实际交期90分位"]
     advice = row["采购交期修改建议"]
 
-    # 卡片配色
+    # 卡片背景颜色分级
     if rate >= 90:
-        bg, bd = "#f0fdf4", "#4ade80"
+        card_color = "#f0fdf4"
+        border_color = "#4ade80"
     elif rate >= 80:
-        bg, bd = "#fffbeb", "#fbbf24"
+        card_color = "#fffbeb"
+        border_color = "#fbbf24"
     else:
-        bg, bd = "#fef2f2", "#f87171"
+        card_color = "#fef2f2"
+        border_color = "#f87171"
 
     with cols[card_idx % 4]:
+        # 改用安全内嵌HTML，避免解析错误
         st.markdown(f"""
-        <div style="padding:14px;border-radius:10px;background:{bg};border:2px solid {bd};margin-bottom:12px;">
-            <div style="font-weight:bold;font-size:16px;margin-bottom:4px;">🏭 {factory}</div>
-            <div style="font-size:13px;color:#555;margin-bottom:6px;">📦 {cat}</div>
+<div style="background:{card_color}; padding:14px; border-radius:10px; border:2px solid {border_color}; margin-bottom:12px;">
 
-            <div style="font-size:14px;line-height:1.5;">
-            <b>最新交期：</b>{current_day}天（准时率{rate}%）<br>
-            <span style="font-size:12px;">统计样本：{sample}单</span>
-            </div>
+**🏭 {factory}**  
+<small>📦 {cat}</small>
 
-            <hr style="margin:5px 0;border:none;border-top:1px solid #ddd;">
+---
+**最新交期**：{current_day}天（准时率 {rate}%）  
+<small>统计样本：{sample} 单</small>
 
-            <div style="font-size:12px;line-height:1.4;color:#666;">
-            📊 交付参考：<br>
-            &nbsp;&nbsp;80%达成：{q80}天<br>
-            &nbsp;&nbsp;85%达成：{q85}天<br>
-            &nbsp;&nbsp;90%达成：{q90}天
-            </div>
+<small>
+📊 交付参考（字号缩小弱化）  
+&nbsp;&nbsp;80% 订单达成：{q80}天  
+&nbsp;&nbsp;85% 订单达成：{q85}天  
+&nbsp;&nbsp;90% 订单达成：{q90}天
+</small>
 
-            <hr style="margin:5px 0;border:none;border-top:1px solid #ddd;">
+---
+💡 **建议**：{advice}
 
-            <div style="font-size:13px;line-height:1.4;">
-            💡 <b>建议：</b>{advice}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+</div>
+""", unsafe_allow_html=True)
     card_idx += 1
 
 # 表格
