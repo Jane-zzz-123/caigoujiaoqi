@@ -1257,3 +1257,117 @@ for idx, status in enumerate(status_sort):
                 st.caption(f"{r['厂家']} | 负载 {r['产能负载利用率%']:.0f}%")
         else:
             st.caption("暂无厂家")
+
+
+# =========================================================
+# 🌟 多月趋势分析：订单数堆叠柱状图 + 准时率折线图
+# =========================================================
+st.markdown("---")
+st.header("📈 多月履约趋势分析（准时率 + 订单数结构）")
+
+# 数据准备
+df_trend = df.copy()
+df_trend["到货年月"] = pd.to_datetime(df_trend["到货年月"]).dt.to_period("M")
+df_trend["到货年月_str"] = df_trend["到货年月"].astype(str)
+
+# 1️⃣ 快捷筛选
+time_option = st.selectbox("⏱️ 快捷时间筛选", ["自定义筛选范围", "近三个月", "近半年", "近一年"])
+
+# 获取所有可选择的月份（排序）
+all_periods = sorted(df_trend["到货年月"].unique())
+all_dates_str = [p.strftime("%Y-%m") for p in all_periods]
+
+# 2️⃣ 快捷筛选逻辑
+end_date_def = all_periods[-1]
+if time_option == "近三个月":
+    start_date_def = end_date_def - 2
+elif time_option == "近半年":
+    start_date_def = end_date_def - 5
+elif time_option == "近一年":
+    start_date_def = end_date_def - 11
+else:
+    start_date_def = all_periods[0]
+
+# 3️⃣ 时间范围选择器
+col1, col2 = st.columns(2)
+with col1:
+    start_date = st.selectbox("开始时间", all_dates_str, index=all_dates_str.index(start_date_def.strftime("%Y-%m")))
+with col2:
+    end_date = st.selectbox("结束时间", all_dates_str, index=all_dates_str.index(end_date_def.strftime("%Y-%m")))
+
+# 4️⃣ 厂家筛选器（多选）
+supplier_list = ["全部厂家"] + sorted(df_trend["厂家"].dropna().unique().tolist())
+selected_suppliers = st.multiselect("🏭 筛选厂家（可多选）", supplier_list, default="全部厂家")
+
+# =========================================================
+# 数据筛选
+# =========================================================
+df_filter = df_trend.copy()
+df_filter["到货年月"] = df_filter["到货年月"].astype(str)
+
+# 时间过滤
+df_filter = df_filter[(df_filter["到货年月"] >= start_date) & (df_filter["到货年月"] <= end_date)]
+
+# 厂家过滤
+if "全部厂家" not in selected_suppliers:
+    df_filter = df_filter[df_filter["厂家"].isin(selected_suppliers)]
+
+# =========================================================
+# 按月统计
+# =========================================================
+df_stat = df_filter.groupby("到货年月_str").agg(
+    总订单数=("采购单号", "count"),
+    准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum())
+).reset_index()
+
+df_stat["准时率%"] = (df_stat["准时订单数"] / df_stat["总订单数"] * 100).round(1)
+df_stat = df_stat.sort_values("到货年月_str")
+
+# =========================================================
+# 📊 绘制组合图
+# =========================================================
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+# 堆叠柱状图：准时（绿）+ 逾期（红）
+fig.add_trace(go.Bar(
+    x=df_stat["到货年月_str"], y=df_stat["准时订单数"],
+    name="准时/提前订单数", marker_color="#2E8B57"
+), secondary_y=False)
+
+fig.add_trace(go.Bar(
+    x=df_stat["到货年月_str"], y=df_stat["逾期订单数"],
+    name="逾期订单数", marker_color="#DC143C"
+), secondary_y=False)
+
+# 折线图：准时率
+fig.add_trace(go.Scatter(
+    x=df_stat["到货年月_str"], y=df_stat["准时率%"],
+    name="准时率%", mode="lines+markers", marker_color="#1E90FF", line=dict(width=3)
+), secondary_y=True)
+
+# 图表设置
+fig.update_layout(
+    barmode="stack",
+    height=500,
+    title_text=f"履约趋势：{start_date} ~ {end_date}",
+    template="plotly_white",
+    legend_orientation="h",
+    legend_y=-0.2
+)
+fig.update_yaxes(title_text="订单数", secondary_y=False)
+fig.update_yaxes(title_text="准时率 (%)", secondary_y=True, range=[0, 105])
+
+st.plotly_chart(fig, use_container_width=True)
+
+# =========================================================
+# 下方数据表格（可选，方便核对）
+# =========================================================
+with st.expander("📄 查看统计数据"):
+    st.dataframe(df_stat.rename(columns={
+        "到货年月_str":"到货月份", "准时订单数":"准时数", "逾期订单数":"逾期数",
+        "总订单数":"总订单", "准时率%":"准时率"
+    }), use_container_width=True, hide_index=True)
