@@ -1180,26 +1180,42 @@ result = pd.concat([
 ], axis=1).fillna(0).reset_index()
 
 # 安全产能 + 负载率
+# 核心：安全产能+负载计算（修复0值bug版）
 result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
 result["产能负载利用率%"] = 0.0
+
+# 仅在安全产能>0时计算负载（避免除以0）
 mask = result["安全可放量产能"] > 0
 result.loc[mask, "产能负载利用率%"] = (
     result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100
 ).round(1)
 
 # 订单建议（带无数据兜底）
+# 替换原来的 get_advice 函数
 def get_advice(row):
-    if row["近半年平均产能（基准）"] == 0:
-        return "⚠️ 暂无历史交付数据，谨慎放量"
-    rate = row["产能负载利用率%"]
-    if rate <= 70:
+    base_cap = row["近半年平均产能（基准）"]
+    ontime_pct = row["近半年准时率%"]
+    load_rate = row["产能负载利用率%"]
+    order_qty = row["当月订单放量"]
+
+    # 兜底1：完全没有历史交付、准时率为0
+    if base_cap <= 0 or ontime_pct <= 5:
+        return "🔴 无交付保障，严禁加单"
+
+    # 兜底2：当月有单、但安全产能为0（除以0异常）
+    if row["安全可放量产能"] <= 0 and order_qty > 0:
+        return "🔴 交付能力极差，超载极高风险"
+
+    # 正常负载判定
+    if load_rate <= 70:
         return "✅ 非常安全，可大幅加单"
-    elif rate <= 100:
+    elif load_rate <= 100:
         return "🟢 匹配合理，正常发放"
-    elif rate <= 130:
+    elif load_rate <= 130:
         return "⚠️ 压力偏高，谨慎加单"
     else:
         return "🔴 超载风险高，极易延期"
+
 
 result["最终订单建议"] = result.apply(get_advice, axis=1)
 
