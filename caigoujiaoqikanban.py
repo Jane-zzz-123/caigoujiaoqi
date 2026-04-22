@@ -491,6 +491,53 @@ df_filter = df[
 
 st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
 
+# ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
+st.markdown("### ⏱ 订单时间筛选设置")
+col1, col2 = st.columns(2)
+
+# 筛选1：选择评估基准月份
+with col1:
+    eval_month = st.selectbox(
+        "选择订单评估月份",
+        sorted(df["到货年月"].dropna().unique(), reverse=True),
+        index=0
+    )
+
+# 筛选2：选择数据分析范围
+with col2:
+    date_range = st.selectbox(
+        "数据分析范围",
+        ["仅选择月份", "近三个月", "近半年"],
+        index=0
+    )
+
+# 核心：根据选择自动计算时间范围
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+eval_date = datetime.strptime(str(eval_month), "%Y-%m")
+if date_range == "仅选择月份":
+    start_date = eval_date
+    end_date = eval_date
+elif date_range == "近三个月":
+    start_date = eval_date - relativedelta(months=2)
+    end_date = eval_date
+else:  # 近半年
+    start_date = eval_date - relativedelta(months=5)
+    end_date = eval_date
+
+# 转换为年月格式
+start_month = int(start_date.strftime("%Y%m"))
+end_month = int(end_date.strftime("%Y%m"))
+
+# 筛选出对应时间范围的数据
+df_filter = df[
+    (df["到货年月"] >= start_month) &
+    (df["到货年月"] <= end_month)
+    ].copy()
+
+st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
+
 # -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
 st.markdown("---")
 st.subheader("🎯 厂家+类目明细 采购交期分位数分析 & 修改建议")
@@ -560,10 +607,10 @@ else:
 
     quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
 
-    # 5. 可视化卡片 —— ✅ 已改为 一行4列
+    # 5. 可视化卡片 —— 一行4列
     st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
     factory_cat_list = quantile_stats.groupby("厂家")
-    cols = st.columns(4)  # 👈 这里改成 4 列
+    cols = st.columns(4)
     card_idx = 0
 
     for factory_name, factory_data in factory_cat_list:
@@ -579,7 +626,7 @@ else:
                 bg_color = "#fef2f2";
                 border_color = "#f87171"
 
-            with cols[card_idx % 4]:  # 👈 这里也改成 4
+            with cols[card_idx % 4]:
                 st.markdown(f"""
                 <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border_color}; margin-bottom:15px;">
                     <div style="font-size:16px; font-weight:bold; margin-bottom:8px;">
