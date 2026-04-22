@@ -444,120 +444,80 @@ else:
     st.markdown("---")
 
 # -------------------------- 逾期时长分层深度分析 --------------------------
+# -------------------------- 逾期时长分层深度分析（最终稳定版） --------------------------
 st.markdown("---")
-st.subheader("⚠️ 逾期时长分层深度分析")
+st.subheader("⚠️ 逾期时长深度分析")
 
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 
-# 1. 筛选仅逾期订单
+# 1. 筛选逾期订单
 overdue_df = df_current[df_current["交期状态"] == "逾期"].copy()
+
 if overdue_df.empty:
-    st.info("当前筛选条件下无逾期订单，无需进行逾期分层分析")
+    st.info("当前筛选条件下无逾期订单")
 else:
-    # 逾期天数（取绝对值）
+    # 2. 计算逾期天数（绝对值）
     overdue_df["逾期天数"] = overdue_df["预计-实际交期的差值"].abs().round(1)
 
-    # 2. 逾期分层
-    bins = [0, 3, 7, 15, float('inf')]
-    labels = ["轻度逾期(0-3天)", "中度逾期(3-7天)", "重度逾期(7-15天)", "极度逾期(＞15天)"]
-    overdue_df["逾期分层"] = pd.cut(
-        overdue_df["逾期天数"], bins=bins, labels=labels, right=False
-    )
+    # 3. 逾期分层
+    def get_overdue_level(days):
+        if days < 3:
+            return "轻度(0-3天)"
+        elif days < 7:
+            return "中度(3-7天)"
+        elif days < 15:
+            return "重度(7-15天)"
+        else:
+            return "极度(>15天)"
 
-    # -------------------------- 1. 整体逾期分布 --------------------------
-    st.markdown("#### 1. 整体逾期分层分布")
-    col1, col2 = st.columns([1, 2])
+    overdue_df["逾期等级"] = overdue_df["逾期天数"].apply(get_overdue_level)
 
-    layer_stats = overdue_df.groupby("逾期分层").agg(
-        逾期订单数=("采购单号", "count"),
-        逾期采购量=("采购量", "sum"),
-        平均逾期天数=("逾期天数", "mean")
+    # -------------------------- 整体逾期分布 --------------------------
+    st.markdown("#### 1. 整体逾期分布")
+    level_summary = overdue_df.groupby("逾期等级").agg(
+        订单数=("采购单号", "count"),
+        采购量=("采购量", sum),
+        平均逾期天数=("逾期天数", np.mean)
     ).reset_index()
+    level_summary["平均逾期天数"] = level_summary["平均逾期天数"].round(1)
+    st.dataframe(level_summary, use_container_width=True, hide_index=True)
 
-    layer_stats["平均逾期天数"] = layer_stats["平均逾期天数"].fillna(0).round(1)
-
-    with col1:
-        st.dataframe(layer_stats, use_container_width=True, hide_index=True)
-
-    with col2:
-        fig = go.Figure()
-        fig.add_trace(go.Pie(labels=layer_stats["逾期分层"], values=layer_stats["逾期采购量"], hole=0.4))
-        fig.update_layout(title="各分层逾期采购量占比")
-        st.plotly_chart(fig, use_container_width=True)
-
-    # -------------------------- 2. 厂家逾期统计（已修复报错） --------------------------
-    st.markdown("#### 2. 各厂家逾期分层统计")
-    factory_overdue = overdue_df.groupby(["厂家", "逾期分层"]).agg(
-        逾期订单数=("采购单号", "count"),
-        逾期采购量=("采购量", "sum"),
-        平均逾期天数=("逾期天数", "mean"),
-        最大逾期天数=("逾期天数", "max")
+    # -------------------------- 各厂家逾期统计 --------------------------
+    st.markdown("#### 2. 厂家逾期统计（按严重程度排序）")
+    factory_detail = overdue_df.groupby(["厂家", "逾期等级"]).agg(
+        订单数=("采购单号", "count"),
+        采购量=("采购量", sum),
+        平均逾期天数=("逾期天数", np.mean),
+        最长逾期天数=("逾期天数", np.max)
     ).reset_index()
+    factory_detail["平均逾期天数"] = factory_detail["平均逾期天数"].round(1)
+    factory_detail["最长逾期天数"] = factory_detail["最长逾期天数"].round(1)
 
-    factory_total = factory_overdue.groupby("厂家").agg(
-        总逾期订单=("逾期订单数", "sum"),
-        总逾期采购量=("逾期采购量", "sum")
-    ).reset_index()
-
-    factory_overdue = factory_overdue.merge(factory_total, on="厂家")
-    factory_overdue["平均逾期天数"] = factory_overdue["平均逾期天数"].fillna(0).round(1)
-    factory_overdue["最大逾期天数"] = factory_overdue["最大逾期天数"].fillna(0).round(1)
+    # 排序：极度 > 重度 > 中度 > 轻度
+    level_order = {"极度(>15天)": 4, "重度(7-15天)": 3, "中度(3-7天)": 2, "轻度(0-3天)": 1}
+    factory_detail["排序"] = factory_detail["逾期等级"].map(level_order)
+    factory_detail = factory_detail.sort_values(["排序", "采购量"], ascending=[False, False])
 
     st.dataframe(
-        factory_overdue[["厂家", "逾期分层", "逾期订单数", "平均逾期天数", "最大逾期天数"]],
+        factory_detail[["厂家", "逾期等级", "订单数", "采购量", "平均逾期天数", "最长逾期天数"]],
         use_container_width=True, hide_index=True
     )
 
-    # -------------------------- 3. 逾期严重度评分 --------------------------
-    st.markdown("#### 3. 厂家逾期严重度评分")
-    score_map = {
-        "轻度逾期(0-3天)": 1,
-        "中度逾期(3-7天)": 3,
-        "重度逾期(7-15天)": 5,
-        "极度逾期(＞15天)": 10
-    }
-
-    overdue_df["分层分值"] = overdue_df["逾期分层"].map(score_map).fillna(0)
-    overdue_df["加权得分"] = overdue_df["采购量"] * overdue_df["分层分值"]
-
-    factory_score = overdue_df.groupby("厂家").agg(
-        总加权得分=("加权得分", "sum"),
-        总逾期采购量=("采购量", "sum"),
-        总逾期订单=("采购单号", "count")
+    # -------------------------- 厂家逾期严重度排名 --------------------------
+    st.markdown("#### 3. 厂家逾期严重度排名（高风险在前）")
+    factory_rank = overdue_df.groupby("厂家").agg(
+        总逾期订单=("采购单号", "count"),
+        总逾期采购量=("采购量", sum),
+        平均逾期天数=("逾期天数", np.mean),
+        最长逾期天数=("逾期天数", np.max)
     ).reset_index()
 
-    factory_score["严重度得分"] = (factory_score["总加权得分"] / factory_score["总逾期采购量"]).fillna(0).round(2)
+    factory_rank["平均逾期天数"] = factory_rank["平均逾期天数"].round(1)
+    factory_rank["最长逾期天数"] = factory_rank["最长逾期天数"].round(1)
+    factory_rank = factory_rank.sort_values("最长逾期天数", ascending=False)
 
-    def get_level(s):
-        if s >= 8: return "🔴 极高风险"
-        if s >= 5: return "🟠 高风险"
-        if s >= 2: return "🟡 中风险"
-        return "🟢 低风险"
-
-    factory_score["风险等级"] = factory_score["严重度得分"].apply(get_level)
-    st.dataframe(factory_score, use_container_width=True, hide_index=True)
-
-    # -------------------------- 4. 环比对比（已修复 np 问题） --------------------------
-    st.markdown("#### 4. 逾期环比对比（本月 VS 上月）")
-    if "df_last" in globals() and not df_last.empty:
-        last_overdue = df_last[df_last["交期状态"] == "逾期"].copy()
-        if not last_overdue.empty:
-            last_overdue["逾期天数"] = last_overdue["预计-实际交期的差值"].abs()
-            last_overdue["逾期分层"] = pd.cut(last_overdue["逾期天数"], bins=bins, labels=labels, right=False)
-
-            cur = overdue_df.groupby("逾期分层")["采购量"].sum().reset_index()
-            las = last_overdue.groupby("逾期分层")["采购量"].sum().reset_index()
-            comp = cur.merge(las, on="逾期分层", how="outer", suffixes=("_本月", "_上月")).fillna(0)
-            comp["环比增减"] = comp["采购量_本月"] - comp["采购量_上月"]
-            comp["环比增减率"] = (comp["环比增减"] / comp["采购量_上月"].replace(0, np.nan) * 100).fillna(0).round(2)
-
-            st.dataframe(comp, use_container_width=True, hide_index=True)
-        else:
-            st.info("上月无逾期订单")
-    else:
-        st.info("无上月数据")
+    st.dataframe(factory_rank, use_container_width=True, hide_index=True)
 
 
 # ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
