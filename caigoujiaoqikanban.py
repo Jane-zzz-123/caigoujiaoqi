@@ -443,29 +443,29 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 逾期时长分层深度分析 ✅ 美观卡片版 --------------------------
+# -------------------------- 逾期深度分析（已修正：逾期=负数） --------------------------
 st.markdown("---")
 st.subheader("⚠️ 逾期深度分析（按逾期严重程度）")
 
 import numpy as np
 import plotly.express as px
 
-# 筛选逾期订单
-overdue_df = df_current[df_current["交期状态"] == "逾期"].copy()
+# 筛选逾期订单（差值 < 0 才是逾期）
+overdue_df = df_current[df_current["预计-实际交期的差值"] < 0].copy()
 
 if overdue_df.empty:
     st.info("当前筛选条件下无逾期订单")
 else:
-    # 逾期天数（取正数）
-    overdue_df["逾期天数"] = overdue_df["预计-实际交期的差值"].abs().round(1)
+    # 正确计算：逾期天数 = 绝对值
+    overdue_df["逾期天数"] = (-overdue_df["预计-实际交期的差值"]).round(1)
 
     # 逾期等级
     def get_level(days):
-        if days < 3:
+        if days <= 3:
             return "轻度(0-3天)"
-        elif days < 7:
+        elif days <= 7:
             return "中度(3-7天)"
-        elif days < 15:
+        elif days <= 15:
             return "重度(7-15天)"
         else:
             return "极度(>15天)"
@@ -508,7 +508,7 @@ else:
             """, unsafe_allow_html=True)
 
     # ==========================================
-    # 2️⃣ 厂家逾期卡片（颜值版 一行3列）
+    # 2️⃣ 厂家逾期卡片（一行3列）
     # ==========================================
     st.markdown("#### 2. 各厂家逾期详情（高风险优先）")
     factory_detail = overdue_df.groupby(["厂家", "逾期等级"]).agg(
@@ -521,15 +521,13 @@ else:
     factory_detail["平均"] = factory_detail["平均"].round(1)
     factory_detail["最长"] = factory_detail["最长"].round(1)
 
-    fac_list = overdue_df.groupby("厂家").agg(
-        total=("采购单号", "count"),
-        max_day=("逾期天数", np.max)
-    ).sort_values("max_day", ascending=False).index
+    # 按最长逾期天数排序
+    fac_max = overdue_df.groupby("厂家")["逾期天数"].max().sort_values(ascending=False).index
 
     cols = st.columns(3)
     idx = 0
 
-    for fac in fac_list:
+    for fac in fac_max:
         sub = factory_detail[factory_detail["厂家"] == fac]
         total_order = sub["订单数"].sum()
         max_day = sub["最长"].max()
@@ -554,7 +552,7 @@ else:
         idx += 1
 
     # ==========================================
-    # 3️⃣ 高风险厂家 TOP 排名（条形图）
+    # 3️⃣ 高风险厂家 TOP 图
     # ==========================================
     st.markdown("#### 3. 高风险厂家 TOP（按最长逾期天数）")
     top = overdue_df.groupby("厂家")["逾期天数"].max().round(1).sort_values(ascending=False).head(10).reset_index()
