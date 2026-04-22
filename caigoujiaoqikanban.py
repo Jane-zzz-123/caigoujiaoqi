@@ -515,13 +515,22 @@ latest_mean = df_latest.groupby(["厂家", "厂家类目明细"]).agg(
     当前采购交期均值=("采购交期", "mean")
 ).reset_index()
 
-# 2）按 厂家+类目 计算【筛选周期的实际交期分位数】
+# 自定义：业务版分位计算（和你手工累计占比完全一样！）
+def biz_quantile(series, q):
+    s = series.dropna().sort_values().reset_index(drop=True)
+    if len(s) == 0:
+        return None
+    idx = int((len(s) * q) - 1e-9)  # 关键：向下取整找真实值
+    idx = max(0, min(idx, len(s)-1))
+    return s.iloc[idx]
+
+# ----------------- 正确分位计算（替换你原来的这段） -----------------
 actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
-    实际交期80分位=("实际采购交期", lambda x: x.quantile(0.8, method='closest_observation')),
-    实际交期85分位=("实际采购交期", lambda x: x.quantile(0.85, method='closest_observation')),
-    实际交期90分位=("实际采购交期", lambda x: x.quantile(0.9, method='closest_observation')),
-    实际交期95分位=("实际采购交期", lambda x: x.quantile(0.95, method='closest_observation')),
-    实际交期100分位=("实际采购交期", lambda x: x.quantile(1.0, method='closest_observation')),
+    实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
+    实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
+    实际交期90分位=("实际采购交期", lambda x: biz_quantile(x, 0.9)),
+    实际交期95分位=("实际采购交期", lambda x: biz_quantile(x, 0.95)),
+    实际交期100分位=("实际采购交期", lambda x: biz_quantile(x, 1.0)),
     样本订单数=("采购单号", "count"),
     准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
 ).reset_index()
