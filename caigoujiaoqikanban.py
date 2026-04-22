@@ -24,7 +24,7 @@ def load_data():
 
         need_cols = [
             "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
-            "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家",
+            "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家","预计到货时间修改",
             "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值"
         ]
         df = df[need_cols]
@@ -74,20 +74,106 @@ if selected_factory and not df_last.empty:
 
 st.markdown("---")
 
-# -------------------------- 核心指标 --------------------------
+# -------------------------- 核心指标（订单数 + 采购量 双统计） --------------------------
+# === 1. 当前月 ===
 current_total = len(df_current)
 current_on_time = len(df_current[df_current["交期状态"] == "提前/准时"])
 current_overdue = len(df_current[df_current["交期状态"] == "逾期"])
 current_on_time_rate = (current_on_time / current_total * 100) if current_total > 0 else 0.0
 current_diff_avg = df_current["预计-实际交期的差值"].mean() if current_total > 0 else 0.0
 
+current_qty = df_current["采购量"].sum()
+current_on_time_qty = df_current[df_current["交期状态"] == "提前/准时"]["采购量"].sum()
+current_overdue_qty = df_current[df_current["交期状态"] == "逾期"]["采购量"].sum()
+
+# === 2. 上月 ===
 last_total = len(df_last) if not df_last.empty else 0
 last_on_time = len(df_last[df_last["交期状态"] == "提前/准时"]) if not df_last.empty else 0
 last_overdue = len(df_last[df_last["交期状态"] == "逾期"]) if not df_last.empty else 0
 last_on_time_rate = (last_on_time / last_total * 100) if last_total > 0 else 0.0
 last_diff_avg = df_last["预计-实际交期的差值"].mean() if (not df_last.empty and last_total > 0) else 0.0
 
-# -------------------------- 卡片组件 --------------------------
+last_qty = df_last["采购量"].sum() if not df_last.empty else 0
+last_on_time_qty = df_last[df_last["交期状态"] == "提前/准时"]["采购量"].sum() if not df_last.empty else 0
+last_overdue_qty = df_last[df_last["交期状态"] == "逾期"]["采购量"].sum() if not df_last.empty else 0
+
+
+# -------------------------- 双指标卡片组件（订单数 + 采购量） --------------------------
+def double_card(col, title,
+                current_cnt, last_cnt,
+                current_qty, last_qty,
+                suffix="", is_good_up=True, bg_color="#fafbfc", is_int=True):
+    # 订单数环比
+    if last_cnt == 0:
+        pct_cnt = "新数据"
+    else:
+        pct_cnt = (current_cnt - last_cnt) / last_cnt * 100
+        pct_cnt = f"{pct_cnt:+.2f}%"
+
+    # 采购量环比
+    if last_qty == 0:
+        pct_qty = "新数据"
+    else:
+        pct_qty = (current_qty - last_qty) / last_qty * 100
+        pct_qty = f"{pct_qty:+.2f}%"
+
+    # 颜色
+    if is_good_up:
+        color_cnt = "#28a745" if current_cnt >= last_cnt else "#dc3545"
+        color_qty = "#28a745" if current_qty >= last_qty else "#dc3545"
+    else:
+        color_cnt = "#dc3545" if current_cnt >= last_cnt else "#28a745"
+        color_qty = "#dc3545" if current_qty >= last_qty else "#28a745"
+
+    # 显示格式
+    current_cnt_str = f"{int(current_cnt)}" if is_int else f"{current_cnt:.2f}"
+    last_cnt_str = f"{int(last_cnt)}" if is_int else f"{last_cnt:.2f}"
+
+    current_qty_str = f"{int(current_qty)}"
+    last_qty_str = f"{int(last_qty)}"
+
+    # 卡片HTML
+    with col:
+        st.markdown(f"""
+        <div style="padding:18px; border-radius:12px; background:{bg_color}; border:1px solid #e5e7eb;">
+          <div style="font-size:15px; color:#555; margin-bottom:8px;">{title}</div>
+
+          <div style="font-size:22px; font-weight:600;">{current_cnt_str} 单</div>
+          <div style="font-size:12px; color:{color_cnt}; margin-top:2px;">
+            环比 {pct_cnt}（上月：{last_cnt_str}）
+          </div>
+
+          <div style="height:10px;"></div>
+
+          <div style="font-size:18px; font-weight:600; color:#333;">{current_qty_str} 件</div>
+          <div style="font-size:12px; color:{color_qty}; margin-top:2px;">
+            环比 {pct_qty}（上月：{last_qty_str}）
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
+# -------------------------- 绘制卡片 --------------------------
+st.subheader(f"📆 {selected_month} 整体分析")
+col1, col2, col3, col4, col5 = st.columns(5)
+
+double_card(col1, "PO单数",
+            current_total, last_total,
+            current_qty, last_qty,
+            "", is_good_up=False, bg_color="#fafbfc", is_int=True)
+
+double_card(col2, "提前/准时",
+            current_on_time, last_on_time,
+            current_on_time_qty, last_on_time_qty,
+            "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
+
+double_card(col3, "逾期",
+            current_overdue, last_overdue,
+            current_overdue_qty, last_overdue_qty,
+            "", is_good_up=False, bg_color="#fef2f2", is_int=True)
+
+
+# 准时率 & 平均交期差值 保持原来单卡片
 def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbfc", is_int=False):
     if last == 0:
         pct = "新数据"
@@ -100,12 +186,8 @@ def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbf
     else:
         color = "#dc3545" if current >= last else "#28a745"
 
-    if is_int:
-        current_str = f"{int(current)}"
-        last_str = f"{int(last)}"
-    else:
-        current_str = f"{current:.2f}"
-        last_str = f"{last:.2f}"
+    current_str = f"{int(current)}" if is_int else f"{current:.2f}"
+    last_str = f"{int(last)}" if is_int else f"{last:.2f}"
 
     with col:
         st.markdown(f"""
@@ -118,12 +200,7 @@ def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbf
         </div>
         """, unsafe_allow_html=True)
 
-st.subheader(f"📆 {selected_month} 整体分析")
-col1, col2, col3, col4, col5 = st.columns(5)
 
-card(col1, "PO单数", current_total, last_total, "", is_good_up=False, is_int=True)
-card(col2, "提前/准时", current_on_time, last_on_time, "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
-card(col3, "逾期", current_overdue, last_overdue, "", is_good_up=False, bg_color="#fef2f2", is_int=True)
 card(col4, "准时率", current_on_time_rate, last_on_time_rate, "%", is_good_up=True, bg_color="#eff6ff")
 card(col5, "平均交期差值", current_diff_avg, last_diff_avg, "天", is_good_up=False)
 
@@ -197,7 +274,7 @@ st.markdown("---")
 # -------------------------- 明细 --------------------------
 st.subheader("📋 交期数据明细")
 table_cols = [
-    "到货年月", "交期状态", "厂家", "下单时间", "采购单号", "品名", "SKU",
+    "到货年月", "交期状态", "厂家", "下单时间", "预计到货时间修改","采购单号", "品名", "SKU","采购量",
     "厂家类目明细", "产品分类", "采购交期", "实际采购交期", "预计-实际交期的差值"
 ]
 df_table = df_current.copy()
