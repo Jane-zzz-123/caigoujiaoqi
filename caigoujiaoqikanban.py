@@ -457,7 +457,7 @@ if overdue_df.empty:
     st.info("当前筛选条件下无逾期订单")
 else:
     # 字段简写，方便计算
-    diff = overdue_df["预计-实际交期的差值"]
+    diff = -overdue_df["预计-实际交期的差值"]
 
     # 严格按你的规则分层
     def get_level(x):
