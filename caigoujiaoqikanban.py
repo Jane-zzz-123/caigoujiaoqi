@@ -451,7 +451,7 @@ import numpy as np
 import plotly.express as px
 
 # 只保留逾期数据（差值 >=1 才算逾期）
-overdue_df = df_current[df_current["预计-实际交期的差值"] >= 1].copy()
+overdue_df = df_current[df_current["预计-实际交期的差值"] <= -1].copy()
 
 if overdue_df.empty:
     st.info("当前筛选条件下无逾期订单")
