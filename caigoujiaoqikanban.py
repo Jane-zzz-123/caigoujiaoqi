@@ -558,13 +558,13 @@ def get_delivery_advice(row, range_type):
     if range_type == "仅选择月份":
         min_sample = 5
     elif range_type == "近三个月":
-        min_sample = 8
+        min_sample = 5
     else:  # 近半年
-        min_sample = 12
+        min_sample = 5
 
     # 样本量不足专属提示
     if sample < min_sample:
-        return f"⚠️ 当前样本量较少，建议拉长统计周期综合评估"
+        return f"⚠️ 当前样本量较少，暂不提出修改建议"
 
     # 高履约（准时率≥90%）
     if rate >= 90:
