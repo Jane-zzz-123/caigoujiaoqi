@@ -452,7 +452,7 @@ col1, col2 = st.columns(2)
 with col1:
     eval_month = st.selectbox(
         "选择订单评估月份",
-        sorted(df["订单年月"].dropna().unique(), reverse=True),
+        sorted(df["到货年月"].dropna().unique(), reverse=True),
         index=0
     )
 
