@@ -1122,9 +1122,11 @@ selected_month = st.selectbox("选择订单评估月份", order_months)
 
 # 周期区间（以所选月份为终点倒推）
 end_month = selected_month
-p3  = pd.period_range(end_month - 2,  end_month, freq='M')
-p6  = pd.period_range(end_month - 5,  end_month, freq='M')
-p12 = pd.period_range(end_month - 11, end_month, freq='M')
+# 转为 period 再计算
+end_p = pd.Period(end_month, freq='M')
+p3  = pd.period_range(end_p - 2, end_p, freq='M')
+p6  = pd.period_range(end_p - 5, end_p, freq='M')
+p12 = pd.period_range(end_p - 11, end_p, freq='M')
 
 # 产能计算函数
 def get_cap(df, period):
