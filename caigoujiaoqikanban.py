@@ -1118,78 +1118,77 @@ df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period
 
 # 选择评估月份
 order_months = sorted(df_final["下单年月"].unique(), reverse=True)
-selected_month = st.selectbox("选择订单评估月份", order_months)
+selected_month = st.selectbox("选择订单评估月份产能", order_months)
 
-# 周期区间
+# 周期区间（以所选月份为终点倒推）
 end_month = selected_month
 end_p = pd.Period(end_month, freq='M')
 p3  = pd.period_range(end_p - 2, end_p, freq='M')
 p6  = pd.period_range(end_p - 5, end_p, freq='M')
 p12 = pd.period_range(end_p - 11, end_p, freq='M')
 
-# --------------------------
-# 原函数：按【到货】算历史产能（不动）
-# --------------------------
+# 按到货年月计算历史产能（用于基准）
 def get_cap(df, period):
     dfp = df[df["到货年月"].isin(period)]
     if dfp.empty:
-        return pd.Series(dtype="float64"), pd.Series(dtype="float64")
+        return pd.Series(dtype=float), pd.Series(dtype=float)
     monthly = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
     avg_cap = monthly.groupby(level=0).mean().round(0)
     max_cap = monthly.groupby(level=0).max()
     return avg_cap, max_cap
 
-# --------------------------
-# ✅ 新增：按【下单】算当月产能（修复口径）
-# --------------------------
-def get_cap_order(df, period):
+# 按下单年月计算当月产能（修复当月为0的问题）
+def get_cap_by_order(df, period):
     dfp = df[df["下单年月"].isin(period)]
     if dfp.empty:
-        return pd.Series(dtype="float64"), pd.Series(dtype="float64")
+        return pd.Series(dtype=float), pd.Series(dtype=float)
     monthly = dfp.groupby(["厂家", "下单年月"])["采购量"].sum()
     avg_cap = monthly.groupby(level=0).mean().round(0)
     max_cap = monthly.groupby(level=0).max()
     return avg_cap, max_cap
 
 # 多口径产能
-cap_now, _       = get_cap_order(df_final, [end_month])  # ✅ 修复
+cap_now, _       = get_cap_by_order(df_final, [end_month])
 cap_3m, _        = get_cap(df_final, p3)
 cap_6m, cap_max  = get_cap(df_final, p6)
 cap_12m, _       = get_cap(df_final, p12)
 
-# 重命名列
+# 重命名列（保持你原来的名字！）
 cap_now   = cap_now.rename("当月实际产能")
 cap_3m    = cap_3m.rename("近3个月平均产能")
 cap_6m    = cap_6m.rename("近半年平均产能（基准）")
 cap_12m   = cap_12m.rename("近一年平均产能")
 cap_max   = cap_max.rename("历史最高单月产能")
 
-# 准时率
+# 准时率计算
 df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
 if not df_p6.empty:
     df_p6["准时标记"] = (df_p6["交期状态"] == "提前/准时").astype(int)
     on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
     on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
 else:
-    on_time_rate = pd.Series(dtype="float64")
+    on_time_rate = pd.Series(dtype=float)
 
 # 当月订单放量
 order_now = df_final[df_final["下单年月"] == selected_month]\
     .groupby("厂家")["采购量"].sum().rename("当月订单放量")
 
-# 合并
-result = pd.concat([cap_now, cap_3m, cap_6m, cap_12m, cap_max, on_time_rate, order_now], axis=1).fillna(0).reset_index()
+# 合并所有数据
+result = pd.concat([
+    cap_now, cap_3m, cap_6m, cap_12m, cap_max,
+    on_time_rate, order_now
+], axis=1).fillna(0).reset_index()
 
-# 安全产能
+# 安全产能 + 负载率
 result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
 result["产能负载利用率%"] = 0.0
-mask = (result["安全可放量产能"] > 0)
-result.loc[mask, "产能负载利用率%"] = (result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100).round(1)
+mask = result["安全可放量产能"] > 0
+result.loc[mask, "产能负载利用率%"] = (
+    result.loc[mask, "当月订单放量"] / result.loc[mask, "安全可放量产能"] * 100
+).round(1)
 
-# --------------------------
-# ✅ 修复：无数据不报错
-# --------------------------
-def get_advice_safe(row):
+# 订单建议（带无数据兜底）
+def get_advice(row):
     if row["近半年平均产能（基准）"] == 0:
         return "⚠️ 暂无历史交付数据，谨慎放量"
     rate = row["产能负载利用率%"]
@@ -1202,14 +1201,17 @@ def get_advice_safe(row):
     else:
         return "🔴 超载风险高，极易延期"
 
-result["最终订单建议"] = result.apply(get_advice_safe, axis=1)
+result["最终订单建议"] = result.apply(get_advice, axis=1)
 
-# 展示
+# 展示列（完全和你原来一样，不改动！）
 show_cols = [
     "厂家","当月实际产能","近3个月平均产能","近半年平均产能（基准）",
     "近一年平均产能","历史最高单月产能","近半年准时率%",
     "安全可放量产能","当月订单放量","产能负载利用率%","最终订单建议"
 ]
+
+# 确保只展示存在的列
+show_cols = [c for c in show_cols if c in result.columns]
 
 st.dataframe(
     result[show_cols].style.format({
@@ -1225,7 +1227,7 @@ st.dataframe(
     }), use_container_width=True, height=600
 )
 
-# 卡片
+# 决策卡片
 st.markdown("---")
 st.subheader("💡 采购放量决策指引")
 status_sort = [
