@@ -545,23 +545,55 @@ for c in cols_round:
 quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
 # 4）交期建议
-def get_advice(row):
-    c = row["当前采购交期均值"]
-    q90 = row["实际交期90分位"]
-    q85 = row["实际交期85分位"]
+# 4. 生成采购交期修改建议（已全面优化话术+样本量逻辑）
+def get_delivery_advice(row, range_type):
+    current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
-    r = row["准时率"]
-    n = row["样本订单数"]
-    if n < 3:
-        return "⚠️ 样本量少，建议看近3/6月"
-    if r >= 90:
-        return f"✅ 建议设为 {q90} 天" if c > q90 else f"⚠️ 建议上调至 {q90} 天"
-    elif r >= 80:
-        return f"🟡 建议设为 {q85} 天" if c > q85 else f"⚠️ 建议上调至 {q85} 天"
-    else:
-        return f"🔴 建议设为 {q80} 天" if c > q80 else f"🔴 必须上调至 {q80} 天"
+    q85 = row["实际交期85分位"]
+    q90 = row["实际交期90分位"]
+    rate = row["准时率"]
+    sample = row["样本订单数"]
 
-quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_advice, axis=1)
+    # 按选择的数据范围，动态判断样本量门槛
+    if range_type == "仅选择月份":
+        min_sample = 5
+    elif range_type == "近三个月":
+        min_sample = 8
+    else:  # 近半年
+        min_sample = 12
+
+    # 样本量不足专属提示
+    if sample < min_sample:
+        return f"⚠️ 当前样本量较少，建议拉长统计周期综合评估"
+
+    # 高履约（准时率≥90%）
+    if rate >= 90:
+        if current > q90:
+            return f"✅ 履约优秀，可优化下调至{q90}天"
+        elif abs(current - q90) <= 1:
+            return "✅ 当前交期合理，匹配90%履约能力"
+        else:
+            return f"🔶 交期偏宽松，可收紧至{q90}天"
+
+    # 中等履约（80%-90%）
+    elif 80 <= rate < 90:
+        if current < q85:
+            return f"🔶 交期略紧张，建议上调至{q85}天，减少逾期"
+        elif abs(current - q85) <= 1:
+            return "🟡 当前交期适配，可维持现状"
+        else:
+            return f"🟡 交期有压缩空间，可下调至{q85}天"
+
+    # 偏低履约（＜80%）
+    else:
+        if current < q80:
+            return f"🔶 履约偏弱，建议上调至{q80}天，大幅降低逾期风险"
+        else:
+            return "🟡 当前交期偏宽松，可根据放量需求适度收紧"
+
+
+# 调用时，把当前选择的范围传入
+quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda row: get_delivery_advice(row, date_range), axis=1)
 
 # 5）卡片：一行4列
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
