@@ -485,8 +485,8 @@ end_month = int(end_date.strftime("%Y%m"))
 
 # 筛选出对应时间范围的数据
 df_filter = df[
-    (df["订单年月"] >= start_month) &
-    (df["订单年月"] <= end_month)
+    (df["到货年月"] >= start_month) &
+    (df["到货年月"] <= end_month)
     ].copy()
 
 st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
