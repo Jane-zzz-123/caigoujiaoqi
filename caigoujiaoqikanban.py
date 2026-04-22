@@ -443,25 +443,24 @@ else:
     # 底部说明
     st.markdown("---")
 
-# -------------------------- 逾期时长分层深度分析 --------------------------
-# -------------------------- 逾期时长分层深度分析（最终稳定版） --------------------------
+# -------------------------- 逾期时长分层深度分析 ✅ 美观卡片版 --------------------------
 st.markdown("---")
-st.subheader("⚠️ 逾期时长深度分析")
+st.subheader("⚠️ 逾期深度分析（按逾期严重程度）")
 
 import numpy as np
 import plotly.express as px
 
-# 1. 筛选逾期订单
+# 筛选逾期订单
 overdue_df = df_current[df_current["交期状态"] == "逾期"].copy()
 
 if overdue_df.empty:
     st.info("当前筛选条件下无逾期订单")
 else:
-    # 2. 计算逾期天数（绝对值）
+    # 逾期天数（取正数）
     overdue_df["逾期天数"] = overdue_df["预计-实际交期的差值"].abs().round(1)
 
-    # 3. 逾期分层
-    def get_overdue_level(days):
+    # 逾期等级
+    def get_level(days):
         if days < 3:
             return "轻度(0-3天)"
         elif days < 7:
@@ -471,53 +470,98 @@ else:
         else:
             return "极度(>15天)"
 
-    overdue_df["逾期等级"] = overdue_df["逾期天数"].apply(get_overdue_level)
+    overdue_df["逾期等级"] = overdue_df["逾期天数"].apply(get_level)
 
-    # -------------------------- 整体逾期分布 --------------------------
+    # ==========================================
+    # 1️⃣ 整体逾期分布（环形图 + 卡片）
+    # ==========================================
     st.markdown("#### 1. 整体逾期分布")
-    level_summary = overdue_df.groupby("逾期等级").agg(
+    col1, col2 = st.columns([1, 1.5])
+
+    level_cnt = overdue_df.groupby("逾期等级").agg(
         订单数=("采购单号", "count"),
         采购量=("采购量", sum),
-        平均逾期天数=("逾期天数", np.mean)
+        平均天数=("逾期天数", np.mean)
     ).reset_index()
-    level_summary["平均逾期天数"] = level_summary["平均逾期天数"].round(1)
-    st.dataframe(level_summary, use_container_width=True, hide_index=True)
+    level_cnt["平均天数"] = level_cnt["平均天数"].round(1)
 
-    # -------------------------- 各厂家逾期统计 --------------------------
-    st.markdown("#### 2. 厂家逾期统计（按严重程度排序）")
+    with col1:
+        color_map = {
+            "轻度(0-3天)": "#10b981",
+            "中度(3-7天)": "#f59e0b",
+            "重度(7-15天)": "#ef4444",
+            "极度(>15天)": "#7e1e1e"
+        }
+        fig = px.pie(level_cnt, names="逾期等级", values="采购量",
+                     color="逾期等级", color_discrete_map=color_map,
+                     hole=0.4, title="逾期采购量占比")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col2:
+        for _, row in level_cnt.iterrows():
+            level = row["逾期等级"]
+            color = color_map[level]
+            st.markdown(f"""
+            <div style="border-left:4px solid {color}; padding:10px 14px; background:#f9fafb; border-radius:8px; margin-bottom:8px;">
+                <b>{level}</b>｜{row['订单数']}单｜{row['采购量']}件｜平均{row['平均天数']}天
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ==========================================
+    # 2️⃣ 厂家逾期卡片（颜值版 一行3列）
+    # ==========================================
+    st.markdown("#### 2. 各厂家逾期详情（高风险优先）")
     factory_detail = overdue_df.groupby(["厂家", "逾期等级"]).agg(
         订单数=("采购单号", "count"),
         采购量=("采购量", sum),
-        平均逾期天数=("逾期天数", np.mean),
-        最长逾期天数=("逾期天数", np.max)
-    ).reset_index()
-    factory_detail["平均逾期天数"] = factory_detail["平均逾期天数"].round(1)
-    factory_detail["最长逾期天数"] = factory_detail["最长逾期天数"].round(1)
-
-    # 排序：极度 > 重度 > 中度 > 轻度
-    level_order = {"极度(>15天)": 4, "重度(7-15天)": 3, "中度(3-7天)": 2, "轻度(0-3天)": 1}
-    factory_detail["排序"] = factory_detail["逾期等级"].map(level_order)
-    factory_detail = factory_detail.sort_values(["排序", "采购量"], ascending=[False, False])
-
-    st.dataframe(
-        factory_detail[["厂家", "逾期等级", "订单数", "采购量", "平均逾期天数", "最长逾期天数"]],
-        use_container_width=True, hide_index=True
-    )
-
-    # -------------------------- 厂家逾期严重度排名 --------------------------
-    st.markdown("#### 3. 厂家逾期严重度排名（高风险在前）")
-    factory_rank = overdue_df.groupby("厂家").agg(
-        总逾期订单=("采购单号", "count"),
-        总逾期采购量=("采购量", sum),
-        平均逾期天数=("逾期天数", np.mean),
-        最长逾期天数=("逾期天数", np.max)
+        平均=("逾期天数", np.mean),
+        最长=("逾期天数", np.max)
     ).reset_index()
 
-    factory_rank["平均逾期天数"] = factory_rank["平均逾期天数"].round(1)
-    factory_rank["最长逾期天数"] = factory_rank["最长逾期天数"].round(1)
-    factory_rank = factory_rank.sort_values("最长逾期天数", ascending=False)
+    factory_detail["平均"] = factory_detail["平均"].round(1)
+    factory_detail["最长"] = factory_detail["最长"].round(1)
 
-    st.dataframe(factory_rank, use_container_width=True, hide_index=True)
+    fac_list = overdue_df.groupby("厂家").agg(
+        total=("采购单号", "count"),
+        max_day=("逾期天数", np.max)
+    ).sort_values("max_day", ascending=False).index
+
+    cols = st.columns(3)
+    idx = 0
+
+    for fac in fac_list:
+        sub = factory_detail[factory_detail["厂家"] == fac]
+        total_order = sub["订单数"].sum()
+        max_day = sub["最长"].max()
+
+        with cols[idx % 3]:
+            st.markdown(f"""
+            <div style="padding:16px; border-radius:12px; background:#fef2f2; border:1px solid #fecaca; margin-bottom:14px;">
+            <div style="font-weight:bold; font-size:15px; margin-bottom:6px;">🏭 {fac}</div>
+            <div style="font-size:13px; color:#444;">逾期订单：{total_order}单｜最长逾期：{max_day}天</div>
+            """, unsafe_allow_html=True)
+
+            for _, row in sub.iterrows():
+                lv = row["逾期等级"]
+                c = "#10b981" if "轻度" in lv else "#f59e0b" if "中度" in lv else "#ef4444"
+                st.markdown(f"""
+                <div style="font-size:12px; margin-top:4px; color:{c};">
+                {row['逾期等级']}｜{row['订单数']}单｜平均{row['平均']}天
+                </div>
+                """, unsafe_allow_html=True)
+
+            st.markdown("</div>", unsafe_allow_html=True)
+        idx += 1
+
+    # ==========================================
+    # 3️⃣ 高风险厂家 TOP 排名（条形图）
+    # ==========================================
+    st.markdown("#### 3. 高风险厂家 TOP（按最长逾期天数）")
+    top = overdue_df.groupby("厂家")["逾期天数"].max().round(1).sort_values(ascending=False).head(10).reset_index()
+    fig = px.bar(top, y="厂家", x="逾期天数", color="逾期天数",
+                 color_continuous_scale=["#f59e0b", "#ef4444"],
+                 orientation="h", title="TOP 10 最长逾期厂家")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 # ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
