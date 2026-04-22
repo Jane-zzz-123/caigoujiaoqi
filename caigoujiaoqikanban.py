@@ -463,12 +463,12 @@ with col2:
         index=0
     )
 
-# 核心：自动计算时间范围（完全适配 数字格式 202503）
+# 核心：自动计算时间范围（完美适配 2025-03 格式）
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-#  eval_month 是数字 202503，转成字符串再解析
-eval_date = datetime.strptime(str(eval_month), "%Y%m")
+# ✅ 修复：格式是 %Y-%m 不是 %Y%m
+eval_date = datetime.strptime(str(eval_month), "%Y-%m")
 
 if date_range == "仅选择月份":
     start_date = eval_date
@@ -480,17 +480,17 @@ else:  # 近半年
     start_date = eval_date - relativedelta(months=5)
     end_date = eval_date
 
-# 转回数字格式 202503（和你数据完全一致）
-start_month = int(start_date.strftime("%Y%m"))
-end_month = int(end_date.strftime("%Y%m"))
+# ✅ 转回字符串格式 2025-03
+start_month_str = start_date.strftime("%Y-%m")
+end_month_str = end_date.strftime("%Y-%m")
 
-# ✅ 终极修复：数字对比数字，绝对不报错
+# ✅ 字符串对比字符串，零报错
 df_filter = df[
-    (df["到货年月"] >= start_month) &
-    (df["到货年月"] <= end_month)
+    (df["到货年月"] >= start_month_str) &
+    (df["到货年月"] <= end_month_str)
     ].copy()
 
-st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
+st.success(f"✅ 已加载：{date_range} | 范围：{start_month_str} ~ {end_month_str} | 订单数：{len(df_filter)} 单")
 
 # -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
 st.markdown("---")
