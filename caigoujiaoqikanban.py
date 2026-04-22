@@ -86,6 +86,9 @@ current_qty = df_current["采购量"].sum()
 current_on_time_qty = df_current[df_current["交期状态"] == "提前/准时"]["采购量"].sum()
 current_overdue_qty = df_current[df_current["交期状态"] == "逾期"]["采购量"].sum()
 
+# ✅ 新增：采购量准时率
+current_qty_on_time_rate = (current_on_time_qty / current_qty * 100) if current_qty > 0 else 0.0
+
 # === 2. 上月 ===
 last_total = len(df_last) if not df_last.empty else 0
 last_on_time = len(df_last[df_last["交期状态"] == "提前/准时"]) if not df_last.empty else 0
@@ -96,6 +99,9 @@ last_diff_avg = df_last["预计-实际交期的差值"].mean() if (not df_last.e
 last_qty = df_last["采购量"].sum() if not df_last.empty else 0
 last_on_time_qty = df_last[df_last["交期状态"] == "提前/准时"]["采购量"].sum() if not df_last.empty else 0
 last_overdue_qty = df_last[df_last["交期状态"] == "逾期"]["采购量"].sum() if not df_last.empty else 0
+
+# ✅ 新增：上月采购量准时率
+last_qty_on_time_rate = (last_on_time_qty / last_qty * 100) if last_qty > 0 else 0.0
 
 
 # -------------------------- 双指标卡片组件（订单数 + 采购量） --------------------------
@@ -153,27 +159,35 @@ def double_card(col, title,
         """, unsafe_allow_html=True)
 
 
-# -------------------------- 绘制卡片 --------------------------
-st.subheader(f"📆 {selected_month} 整体分析")
-col1, col2, col3, col4, col5 = st.columns(5)
+# -------------------------- 准时率双口径卡片 --------------------------
+def rate_card(col, order_curr, order_last, qty_curr, qty_last, bg_color="#eff6ff"):
+    # 订单
+    if order_last == 0:
+        op = "新数据"
+    else:
+        op = f"{(order_curr - order_last)/order_last*100:+.2f}%"
+    oc = "#28a745" if order_curr >= order_last else "#dc3545"
 
-double_card(col1, "PO单数",
-            current_total, last_total,
-            current_qty, last_qty,
-            "", is_good_up=False, bg_color="#fafbfc", is_int=True)
+    # 采购量
+    if qty_last == 0:
+        qp = "新数据"
+    else:
+        qp = f"{(qty_curr - qty_last)/qty_last*100:+.2f}%"
+    qc = "#28a745" if qty_curr >= qty_last else "#dc3545"
 
-double_card(col2, "提前/准时",
-            current_on_time, last_on_time,
-            current_on_time_qty, last_on_time_qty,
-            "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
+    with col:
+        st.markdown(f"""
+        <div style="padding:18px; border-radius:12px; background:{bg_color}; border:1px solid #e5e7eb;">
+          <div style="font-size:15px; color:#555; margin-bottom:8px;">准时率</div>
+          <div style="font-size:18px; font-weight:600;">订单：{order_curr:.1f}%</div>
+          <div style="font-size:12px; color:{oc}; margin-bottom:6px;">环比 {op}（上月：{order_last:.1f}%）</div>
+          <div style="font-size:18px; font-weight:600;">采购量：{qty_curr:.1f}%</div>
+          <div style="font-size:12px; color:{qc};">环比 {qp}（上月：{qty_last:.1f}%）</div>
+        </div>
+        """, unsafe_allow_html=True)
 
-double_card(col3, "逾期",
-            current_overdue, last_overdue,
-            current_overdue_qty, last_overdue_qty,
-            "", is_good_up=False, bg_color="#fef2f2", is_int=True)
 
-
-# 准时率 & 平均交期差值 保持原来单卡片
+# -------------------------- 普通卡片 --------------------------
 def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbfc", is_int=False):
     if last == 0:
         pct = "新数据"
@@ -201,7 +215,28 @@ def card(col, title, current, last, suffix="", is_good_up=True, bg_color="#fafbf
         """, unsafe_allow_html=True)
 
 
-card(col4, "准时率", current_on_time_rate, last_on_time_rate, "%", is_good_up=True, bg_color="#eff6ff")
+# -------------------------- 绘制卡片 --------------------------
+st.subheader(f"📆 {selected_month} 整体分析")
+col1, col2, col3, col4, col5 = st.columns(5)
+
+double_card(col1, "PO单数",
+            current_total, last_total,
+            current_qty, last_qty,
+            "", is_good_up=False, bg_color="#fafbfc", is_int=True)
+
+double_card(col2, "提前/准时",
+            current_on_time, last_on_time,
+            current_on_time_qty, last_on_time_qty,
+            "", is_good_up=True, bg_color="#f0fdf4", is_int=True)
+
+double_card(col3, "逾期",
+            current_overdue, last_overdue,
+            current_overdue_qty, last_overdue_qty,
+            "", is_good_up=False, bg_color="#fef2f2", is_int=True)
+
+# ✅ 准时率（双口径）
+rate_card(col4, current_on_time_rate, last_on_time_rate, current_qty_on_time_rate, last_qty_on_time_rate)
+
 card(col5, "平均交期差值", current_diff_avg, last_diff_avg, "天", is_good_up=False)
 
 st.markdown("---")
