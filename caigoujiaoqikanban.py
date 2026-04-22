@@ -546,7 +546,7 @@ quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
 # 4）交期建议
 # 4. 生成采购交期修改建议（已全面优化话术+样本量逻辑）
-def get_delivery_advice(row, range_type):
+def get_delivery_advice(row, date_range):
     current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
     q85 = row["实际交期85分位"]
@@ -554,46 +554,52 @@ def get_delivery_advice(row, range_type):
     rate = row["准时率"]
     sample = row["样本订单数"]
 
-    # 按选择的数据范围，动态判断样本量门槛
-    if range_type == "仅选择月份":
+    # 1. 动态样本量门槛
+    if date_range == "仅选择月份":
         min_sample = 5
-    elif range_type == "近三个月":
+    elif date_range == "近三个月":
         min_sample = 5
-    else:  # 近半年
+    else: # 近半年
         min_sample = 5
 
-    # 样本量不足专属提示
     if sample < min_sample:
-        return f"⚠️ 当前样本量较少，暂不提出修改建议"
+        return "⚠️ 样本数据太少，暂不提出修改建议"
 
-    # 高履约（准时率≥90%）
-    if rate >= 90:
-        if current > q90:
-            return f"✅ 履约优秀，可优化下调至{q90}天"
-        elif abs(current - q90) <= 1:
-            return "✅ 当前交期合理，匹配90%履约能力"
-        else:
-            return f"🔶 交期偏宽松，可收紧至{q90}天"
-
-    # 中等履约（80%-90%）
+    # 2. 根据准时率匹配对应参考基准分位
+    if rate < 80:
+        ref_q = q80
     elif 80 <= rate < 90:
-        if current < q85:
-            return f"🔶 交期略紧张，建议上调至{q85}天，减少逾期"
-        elif abs(current - q85) <= 1:
-            return "🟡 当前交期适配，可维持现状"
-        else:
-            return f"🟡 交期有压缩空间，可下调至{q85}天"
-
-    # 偏低履约（＜80%）
+        ref_q = q85
     else:
-        if current < q80:
-            return f"🔶 履约偏弱，建议上调至{q80}天，大幅降低逾期风险"
+        ref_q = q90
+
+    # 3. 核心：2天以内全部判定为偏差不大，无需调整
+    diff = abs(current - ref_q)
+    if diff <= 2:
+        return "✅ 偏差不大，现有交期合理，可继续保持"
+
+    # 4. 差值超过2天，再给出精准优化建议
+    if rate >= 90:
+        if current > ref_q:
+            return f"✅ 履约优秀，可适度下调至{ref_q}天，提升整体周转效率"
         else:
-            return "🟡 当前交期偏宽松，可根据放量需求适度收紧"
+            return f"🟡 交期略偏紧张，建议小幅上调至{ref_q}天规避风险"
+
+    elif 80 <= rate < 90:
+        if current < ref_q:
+            return f"🟡 履约整体稳定，建议上调至{ref_q}天，减少逾期波动"
+        else:
+            return f"🟡 交期存在压缩空间，可下调至{ref_q}天优化交付"
+
+    else:
+        if current < ref_q:
+            return f"🟠 履约偏弱，建议上调至{ref_q}天，大幅降低逾期风险"
+        else:
+            return "🟡 当前交期较为宽松，可根据放量需求适度收紧"
 
 
-# 调用时，把当前选择的范围传入
-quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda row: get_delivery_advice(row, date_range), axis=1)
+# 调用执行
+quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda x: get_delivery_advice(x, date_range), axis=1)
 
 # 5）卡片：一行4列
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
