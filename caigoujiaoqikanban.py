@@ -758,7 +758,7 @@ latest_arrival_month = sorted(df["到货年月"].dropna().unique())[-1]
 
 with col1:
     eval_month = st.selectbox(
-        "选择订单评估月份",
+        "选择订单的评估月份",
         sorted(df["到货年月"].dropna().unique(), reverse=True),
         index=0
     )
