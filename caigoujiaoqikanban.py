@@ -278,6 +278,10 @@ table_cols = [
     "厂家类目明细", "产品分类", "采购交期", "实际采购交期", "预计-实际交期的差值"
 ]
 df_table = df_current.copy()
+
+# ====================== 【加这一行！】解决重复列报错 ======================
+df_table = df_table.loc[:, ~df_table.columns.duplicated()]
+
 df_table["排序标识"] = df_table["交期状态"].apply(lambda x: 0 if x == "逾期" else 1)
 df_table = df_table.sort_values(["排序标识", "采购量"], ascending=[True, False])
 st.dataframe(df_table[table_cols], use_container_width=True, height=300)
