@@ -517,11 +517,11 @@ latest_mean = df_latest.groupby(["厂家", "厂家类目明细"]).agg(
 
 # 2）按 厂家+类目 计算【筛选周期的实际交期分位数】
 actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
-    实际交期80分位=("实际采购交期", lambda x: x.quantile(0.8)),
-    实际交期85分位=("实际采购交期", lambda x: x.quantile(0.85)),
-    实际交期90分位=("实际采购交期", lambda x: x.quantile(0.9)),
-    实际交期95分位=("实际采购交期", lambda x: x.quantile(0.95)),
-    实际交期100分位=("实际采购交期", lambda x: x.quantile(1.0)),
+    实际交期80分位=("实际采购交期", lambda x: x.quantile(0.8, method='closest_observation')),
+    实际交期85分位=("实际采购交期", lambda x: x.quantile(0.85, method='closest_observation')),
+    实际交期90分位=("实际采购交期", lambda x: x.quantile(0.9, method='closest_observation')),
+    实际交期95分位=("实际采购交期", lambda x: x.quantile(0.95, method='closest_observation')),
+    实际交期100分位=("实际采购交期", lambda x: x.quantile(1.0, method='closest_observation')),
     样本订单数=("采购单号", "count"),
     准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
 ).reset_index()
