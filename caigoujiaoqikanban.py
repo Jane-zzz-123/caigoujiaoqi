@@ -444,15 +444,63 @@ else:
     st.markdown("---")
 
 # -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
+# ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
+st.markdown("### ⏱ 订单时间筛选设置")
+col1, col2 = st.columns(2)
+
+# 筛选1：选择评估基准月份
+with col1:
+    eval_month = st.selectbox(
+        "选择订单评估月份",
+        sorted(df["订单年月"].dropna().unique(), reverse=True),
+        index=0
+    )
+
+# 筛选2：选择数据分析范围
+with col2:
+    date_range = st.selectbox(
+        "数据分析范围",
+        ["仅选择月份", "近三个月", "近半年"],
+        index=0
+    )
+
+# 核心：根据选择自动计算时间范围
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+
+eval_date = datetime.strptime(str(eval_month), "%Y-%m")
+if date_range == "仅选择月份":
+    start_date = eval_date
+    end_date = eval_date
+elif date_range == "近三个月":
+    start_date = eval_date - relativedelta(months=2)
+    end_date = eval_date
+else:  # 近半年
+    start_date = eval_date - relativedelta(months=5)
+    end_date = eval_date
+
+# 转换为年月格式
+start_month = int(start_date.strftime("%Y%m"))
+end_month = int(end_date.strftime("%Y%m"))
+
+# 筛选出对应时间范围的数据
+df_filter = df[
+    (df["订单年月"] >= start_month) &
+    (df["订单年月"] <= end_month)
+    ].copy()
+
+st.success(f"✅ 已加载：{date_range} | 范围：{start_month} ~ {end_month} | 订单数：{len(df_filter)} 单")
+
+# -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
 st.markdown("---")
 st.subheader("🎯 厂家+类目明细 采购交期分位数分析 & 修改建议")
 
 # 1. 数据预处理（过滤有效数据）
-df_quantile = df_current[
-    (df_current["厂家"].notna()) &
-    (df_current["厂家类目明细"].notna()) &
-    (df_current["采购交期"].notna()) &
-    (df_current["实际采购交期"].notna())
+df_quantile = df_filter[
+    (df_filter["厂家"].notna()) &
+    (df_filter["厂家类目明细"].notna()) &
+    (df_filter["采购交期"].notna()) &
+    (df_filter["实际采购交期"].notna())
     ].copy()
 
 if df_quantile.empty:
@@ -465,19 +513,19 @@ else:
         实际交期85分位=("实际采购交期", lambda x: x.quantile(0.85)),
         实际交期90分位=("实际采购交期", lambda x: x.quantile(0.9)),
         实际交期95分位=("实际采购交期", lambda x: x.quantile(0.95)),
-        实际交期100分位=("实际采购交期", lambda x: x.quantile(1.0)),  # 最大值
+        实际交期100分位=("实际采购交期", lambda x: x.quantile(1.0)),
         样本订单数=("采购单号", "count"),
         准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
     ).reset_index()
 
-    # 3. 保留2位小数，统一格式 ✅【这里彻底修复】
+    # 3. 保留2位小数，统一格式
     for col in ["当前采购交期均值", "实际交期80分位", "实际交期85分位", "实际交期90分位", "实际交期95分位",
                 "实际交期100分位"]:
         quantile_stats[col] = quantile_stats[col].round(2)
     quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
 
-    # 4. 生成采购交期修改建议 ✅【列名全部匹配修复】
+    # 4. 生成采购交期修改建议
     def get_delivery_advice(row):
         current = row["当前采购交期均值"]
         q90 = row["实际交期90分位"]
@@ -487,35 +535,35 @@ else:
         sample = row["样本订单数"]
 
         if sample < 3:
-            return "⚠️ 样本量不足（<3单），暂无法给出精准建议"
+            return "⚠️ 样本量不足（<3单），建议查看近3月/近半年"
 
         if rate >= 90:
             if current > q90:
-                return f"✅ 建议下调至{q90}天（当前{current}天，90%订单可达成）"
+                return f"✅ 建议下调至{q90}天（90%订单可达成）"
             elif current == q90:
                 return f"✅ 当前交期合理，维持{current}天"
             else:
-                return f"⚠️ 当前交期偏紧，建议上调至{q90}天"
+                return f"⚠️ 交期偏紧，建议上调至{q90}天"
         elif 80 <= rate < 90:
             if current > q85:
-                return f"🟡 建议下调至{q85}天（当前{current}天，85%订单可达成）"
+                return f"🟡 建议下调至{q85}天（85%订单可达成）"
             elif current == q85:
-                return f"🟡 当前交期基本合理，维持{current}天"
+                return f"🟡 交期合理，维持{current}天"
             else:
-                return f"⚠️ 当前交期偏紧，建议上调至{q85}天"
+                return f"⚠️ 交期偏紧，上调至{q85}天"
         else:
             if current > q80:
-                return f"🔴 建议下调至{q80}天（当前{current}天，80%订单可达成）"
+                return f"🔴 建议下调至{q80}天（80%订单可达成）"
             else:
-                return f"🔴 建议上调至{q80}天（降低逾期风险）"
+                return f"🔴 交期过紧，上调至{q80}天"
 
 
     quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
 
-    # 5. 可视化卡片 ✅【列名全部匹配修复】
+    # 5. 可视化卡片 —— ✅ 已改为 一行4列
     st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
     factory_cat_list = quantile_stats.groupby("厂家")
-    cols = st.columns(3)
+    cols = st.columns(4)  # 👈 这里改成 4 列
     card_idx = 0
 
     for factory_name, factory_data in factory_cat_list:
@@ -531,32 +579,28 @@ else:
                 bg_color = "#fef2f2";
                 border_color = "#f87171"
 
-            with cols[card_idx % 3]:
+            with cols[card_idx % 4]:  # 👈 这里也改成 4
                 st.markdown(f"""
                 <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border_color}; margin-bottom:15px;">
                     <div style="font-size:16px; font-weight:bold; margin-bottom:8px;">
                         🏭 {factory_name} - 📦 {cat_name}
                     </div>
                     <div style="font-size:13px; line-height:1.8;">
-                        <b>基础信息：</b><br>
-                        样本订单数：{int(row['样本订单数'])} 单｜准时率：{row['准时率']}%<br>
-                        当前采购交期均值：{row['当前采购交期均值']} 天<br>
-                        <hr style="margin:8px 0;">
-                        <b>实际交期分位数：</b><br>
+                        <b>样本：</b>{int(row['样本订单数'])} 单｜准时率：{row['准时率']}%<br>
+                        <b>当前交期：</b>{row['当前采购交期均值']} 天<br>
+                        <hr style="margin:5px 0;">
                         80%分位：{row['实际交期80分位']} 天<br>
                         85%分位：{row['实际交期85分位']} 天<br>
                         90%分位：{row['实际交期90分位']} 天<br>
                         95%分位：{row['实际交期95分位']} 天<br>
-                        100%分位：{row['实际交期100分位']} 天<br>
-                        <hr style="margin:8px 0;">
-                        <b>💡 修改建议：</b><br>
-                        {row['采购交期修改建议']}
+                        <hr style="margin:5px 0;">
+                        <b>💡 建议：</b>{row['采购交期修改建议']}
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
             card_idx += 1
 
-    # 6. 展示表格
+    # 6. 表格展示
     st.markdown("#### 📊 交期分位数分析明细表格")
     st.dataframe(quantile_stats, use_container_width=True, hide_index=True)
 
