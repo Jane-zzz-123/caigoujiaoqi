@@ -1643,6 +1643,81 @@ st.success(f"""
 • 平均月产能：**{avg_cap:.0f} 件**
 • 产能波动范围：**{min_cap:.0f} ~ {max_cap:.0f} 件**
 """)
+# ========================================================================
+# 新增：逐月滑动半年产能&准时率明细表格（和单月面板算法完全统一）
+# ========================================================================
+st.markdown("---")
+st.subheader("📋 逐月滑动半年产能明细")
+
+# 定义滑动半年计算函数
+def get_rolling_half_year_data(df, current_month_str):
+    current_p = pd.Period(current_month_str, freq='M')
+    # 滑动窗口：截止当月，往前追溯最多6个月（不足6月则取全部）
+    start_p = current_p - 5
+    window_periods = pd.period_range(start_p, current_p, freq='M')
+    window_list = [str(p) for p in window_periods]
+
+    # 筛选窗口周期内全部数据
+    df_window = df_filter[df_filter["到货年月_str"].isin(window_list)].copy()
+    if df_window.empty:
+        return 0, 0, 0
+
+    # 1. 近半年平均产能
+    monthly_total = df_window.groupby("到货年月_str")["采购量"].sum()
+    half_year_avg_cap = monthly_total.mean().round(0)
+
+    # 2. 近半年准时率
+    total_order = len(df_window)
+    ontime_order = (df_window["交期状态"] == "提前/准时").sum()
+    half_year_on_time = (ontime_order / total_order * 100).round(1) if total_order > 0 else 0
+
+    return half_year_avg_cap, half_year_on_time, total_order
+
+# 逐月计算所有指标
+table_data = []
+for idx, row in df_volume.iterrows():
+    month = row["到货年月_str"]
+    month_cn = row["到货月份_中文"]
+    current_cap = row["总采购量"]
+
+    # 调用滑动计算
+    avg_6m_cap, rate_6m, _ = get_rolling_half_year_data(df_filter, month)
+
+    # 统一标准公式计算
+    safe_cap = (avg_6m_cap * rate_6m / 100).round(0)
+    load_rate = 0.0
+    if safe_cap > 0:
+        load_rate = (current_cap / safe_cap * 100).round(1)
+
+    # 组装表格行
+    table_data.append({
+        "到货月份": month_cn,
+        "当月真实产能(件)": int(current_cap),
+        "滑动近半年平均产能(件)": int(avg_6m_cap),
+        "滑动近半年准时率": f"{rate_6m}%",
+        "当月安全可放量产能(件)": int(safe_cap),
+        "当月产能负载利用率": f"{load_rate}%"
+    })
+
+# 转为DataFrame展示
+df_table = pd.DataFrame(table_data)
+
+st.dataframe(
+    df_table,
+    use_container_width=True,
+    hide_index=True,
+    height=500
+)
+
+# 补充提示说明
+st.info("""
+💡 计算规则说明：
+1. 滑动窗口：以当月为终点，往前追溯最多6个月，历史不足6个月则取全部已有数据
+2. 安全产能 = 滑动近半年平均产能 × 滑动近半年准时率
+3. 负载利用率 = 当月真实产能 ÷ 当月安全可放量产能
+4. 完全和上方【厂家产能综合分析】单月面板算法保持一致
+""")
+
 
 # ========================================================================
 # 5. 履约等级变化趋势
