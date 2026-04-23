@@ -1399,26 +1399,25 @@ with st.expander("📄 查看统计数据"):
         "总订单数":"总订单", "准时率%":"准时率"
     })[["到货月份","总订单","准时数","逾期数","准时率"]],
     use_container_width=True, hide_index=True)
-    
+
 # =========================================================
-# 🌟 新增：逾期深度趋势分析（平均逾期天数 + 最长逾期天数）
-# 适配你的数据：逾期天数 = 采购交期 - 实际采购交期（负数=逾期）
+# 🌟 逾期深度趋势分析（适配你的真实列名：预计-实际交期的差值）
+# 规则：负数=逾期，正数=准时
 # =========================================================
 st.subheader("📅 逾期深度趋势（平均逾期天数 / 最长逾期天数）")
 
-# 统计逾期深度（基于已筛选的数据 df_filter）
+# 统计逾期深度（使用你真实列名：预计-实际交期的差值）
 df_delay_stat = df_filter.groupby("到货年月_str").agg(
     总订单数=("采购单号", "count"),
     逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
-    # 只取负数（逾期），取绝对值后计算平均/最大值
-    平均逾期天数=("逾期天数", lambda x: abs(x[x < 0]).mean().round(1) if (x < 0).any() else 0),
-    最长逾期天数=("逾期天数", lambda x: abs(x[x < 0]).max() if (x < 0).any() else 0)
+    平均逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).mean().round(1) if (x < 0).any() else 0),
+    最长逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).max() if (x < 0).any() else 0)
 ).reset_index()
 
 df_delay_stat = df_delay_stat.sort_values("到货年月_str")
 df_delay_stat["到货月份_中文"] = pd.to_datetime(df_delay_stat["到货年月_str"]).dt.strftime("%Y年%m月")
 
-# 绘图：双折线趋势图
+# 绘图
 import plotly.graph_objects as go
 fig_delay = go.Figure()
 
