@@ -1122,7 +1122,7 @@ for i in range(0, len(cate_list), 3):
 
 # ====================== 科学优化版：近半年平均产能为基准 ======================
 st.markdown("---")
-st.header("🏭 厂家产能&准时率&订单放量综合分析（科学基准版）")
+st.header("🏭 厂家产能&准时率&订单放量综合分析")
 
 df_final = df.copy()
 
@@ -1277,7 +1277,174 @@ for idx, status in enumerate(status_sort):
 # 🌟 多月趋势分析：订单数堆叠柱状图 + 准时率折线图（中文坐标+数值标签版）
 # =========================================================
 st.markdown("---")
-st.header("📈 多月履约趋势分析（准时率 + 订单数结构）")
+# =========================================================
+# 🌟 多月趋势分析：订单数堆叠柱状图 + 准时率折线图（无筛选器·整体版）
+# =========================================================
+st.header("📈 整体的多月履约趋势分析")
+
+# 数据准备
+df_trend = df.copy()
+df_trend["到货年月"] = pd.to_datetime(df_trend["到货年月"]).dt.to_period("M")
+df_trend["到货年月_str"] = df_trend["到货年月"].astype(str)
+
+# =========================================================
+# 直接全量统计，不做任何筛选
+# =========================================================
+df_filter = df_trend.copy()
+
+# =========================================================
+# 按月统计
+# =========================================================
+df_stat = df_filter.groupby("到货年月_str").agg(
+    总订单数=("采购单号", "count"),
+    准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum())
+).reset_index()
+
+df_stat["准时率%"] = (df_stat["准时订单数"] / df_stat["总订单数"] * 100).round(1)
+df_stat = df_stat.sort_values("到货年月_str")
+
+# ===================== 横坐标转为中文日期 =====================
+df_stat["到货月份_中文"] = pd.to_datetime(df_stat["到货年月_str"]).dt.strftime("%Y年%m月")
+
+# =========================================================
+# 📊 绘制组合图（中文坐标 + 全部数值直接显示在图上）
+# =========================================================
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+# 1. 准时订单数（绿色柱子 + 显示数值）
+fig.add_trace(go.Bar(
+    x=df_stat["到货月份_中文"], y=df_stat["准时订单数"],
+    name="准时/提前订单数", marker_color="#27AE60",
+    text=df_stat["准时订单数"], textposition="auto"
+), secondary_y=False)
+
+# 2. 逾期订单数（红色柱子 + 显示数值）
+fig.add_trace(go.Bar(
+    x=df_stat["到货月份_中文"], y=df_stat["逾期订单数"],
+    name="逾期订单数", marker_color="#E74C3C",
+    text=df_stat["逾期订单数"], textposition="auto"
+), secondary_y=False)
+
+# 3. 准时率折线（蓝色+数值标签）
+fig.add_trace(go.Scatter(
+    x=df_stat["到货月份_中文"], y=df_stat["准时率%"],
+    name="准时率%", mode="lines+markers+text",
+    text=[f"{v}%" for v in df_stat["准时率%"]],
+    textposition="top center",
+    marker_color="#3498DB", line=dict(width=3)
+), secondary_y=True)
+
+# 图表样式
+fig.update_layout(
+    barmode="stack",
+    height=500,
+    title_text="整体履约趋势（全厂家）",
+    template="plotly_white",
+    legend_orientation="h",
+    legend_y=-0.2,
+    xaxis_title="到货月份",
+    yaxis_title="订单数"
+)
+
+# 右Y轴：准时率
+fig.update_yaxes(title_text="准时率 (%)", secondary_y=True, range=[0, 105])
+
+st.plotly_chart(fig, use_container_width=True)
+
+# =========================================================
+# 数据核对表格
+# =========================================================
+with st.expander("📄 查看统计数据"):
+    st.dataframe(df_stat.rename(columns={
+        "到货月份_中文":"到货月份", "准时订单数":"准时数", "逾期订单数":"逾期数",
+        "总订单数":"总订单", "准时率%":"准时率"
+    })[["到货月份","总订单","准时数","逾期数","准时率"]],
+    use_container_width=True, hide_index=True)
+
+# =========================================================
+# 🌟 逾期深度趋势分析（柱形：逾期订单数 + 折线：平均/最长逾期天数）
+# 适配列名：预计-实际交期的差值（负数=逾期）
+# =========================================================
+st.subheader("📅 逾期深度趋势（逾期订单量 + 天数）")
+
+# 统计逾期深度
+df_delay_stat = df_filter.groupby("到货年月_str").agg(
+    总订单数=("采购单号", "count"),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
+    平均逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).mean().round(1) if (x < 0).any() else 0),
+    最长逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).max() if (x < 0).any() else 0)
+).reset_index()
+
+df_delay_stat = df_delay_stat.sort_values("到货年月_str")
+df_delay_stat["到货月份_中文"] = pd.to_datetime(df_delay_stat["到货年月_str"]).dt.strftime("%Y年%m月")
+
+# ==================== 绘图：柱形 + 双折线 ====================
+import plotly.graph_objects as go
+fig_delay = go.Figure()
+
+# 👇 柱形图：逾期订单数
+fig_delay.add_trace(go.Bar(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["逾期订单数"],
+    name="逾期订单数",
+    marker_color="#FF9900",
+    opacity=0.8
+))
+
+# 👇 折线：平均逾期天数
+fig_delay.add_trace(go.Scatter(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["平均逾期天数"],
+    name="平均逾期天数",
+    mode="lines+markers+text",
+    text=df_delay_stat["平均逾期天数"],
+    textposition="top center",
+    line=dict(color="#E64A19", width=3),
+    marker=dict(size=6),
+    yaxis="y2"
+))
+
+# 👇 折线：最长逾期天数
+fig_delay.add_trace(go.Scatter(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["最长逾期天数"],
+    name="最长逾期天数",
+    mode="lines+markers+text",
+    text=df_delay_stat["最长逾期天数"],
+    textposition="bottom center",
+    line=dict(color="#C0392B", width=3, dash="dot"),
+    marker=dict(size=6),
+    yaxis="y2"
+))
+
+# 双轴设置（左：订单数，右：逾期天数）
+fig_delay.update_layout(
+    height=420,
+    title_text="整体逾期趋势：订单量 + 逾期天数",
+    template="plotly_white",
+    legend_orientation="h",
+    legend_y=-0.2,
+    xaxis_title="到货月份",
+    yaxis=dict(title="逾期订单数"),
+    yaxis2=dict(title="逾期天数", overlaying="y", side="right"),
+)
+
+st.plotly_chart(fig_delay, use_container_width=True)
+
+# 数据核对
+with st.expander("📄 查看逾期深度数据"):
+    st.dataframe(
+        df_delay_stat[["到货月份_中文", "总订单数", "逾期订单数", "平均逾期天数", "最长逾期天数"]]
+        .rename(columns={"到货月份_中文":"到货月份"}),
+        use_container_width=True, hide_index=True
+    )
+
+
+st.header("📈 厂家多月履约趋势分析（准时率 + 订单数结构）")
 
 # 数据准备
 df_trend = df.copy()
