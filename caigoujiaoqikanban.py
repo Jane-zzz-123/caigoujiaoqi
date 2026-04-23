@@ -1011,7 +1011,10 @@ compare_df = df_current.groupby(["产品分类", "厂家"], as_index=False).agg(
 )
 
 # 准时率
-compare_df["准时率%"] = (compare_df["准时数"] / compare_df["订单数"] * 100).round(1)
+# 修复：处理除数为0 + Arrow 数据类型兼容问题
+compare_df["准时率%"] = (
+    (compare_df["准时数"].astype(float) / compare_df["订单数"].replace(0, np.nan).astype(float)) * 100
+).round(1).fillna(0)
 
 # 平均交期保留2位小数
 compare_df["平均交期"] = compare_df["平均交期"].round(2)
