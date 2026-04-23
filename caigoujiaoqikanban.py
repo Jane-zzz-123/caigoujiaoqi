@@ -1401,12 +1401,12 @@ with st.expander("📄 查看统计数据"):
     use_container_width=True, hide_index=True)
 
 # =========================================================
-# 🌟 逾期深度趋势分析（适配你的真实列名：预计-实际交期的差值）
-# 规则：负数=逾期，正数=准时
+# 🌟 逾期深度趋势分析（柱形：逾期订单数 + 折线：平均/最长逾期天数）
+# 适配列名：预计-实际交期的差值（负数=逾期）
 # =========================================================
-st.subheader("📅 逾期深度趋势（平均逾期天数 / 最长逾期天数）")
+st.subheader("📅 逾期深度趋势（逾期订单量 + 天数）")
 
-# 统计逾期深度（使用你真实列名：预计-实际交期的差值）
+# 统计逾期深度
 df_delay_stat = df_filter.groupby("到货年月_str").agg(
     总订单数=("采购单号", "count"),
     逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
@@ -1417,11 +1417,20 @@ df_delay_stat = df_filter.groupby("到货年月_str").agg(
 df_delay_stat = df_delay_stat.sort_values("到货年月_str")
 df_delay_stat["到货月份_中文"] = pd.to_datetime(df_delay_stat["到货年月_str"]).dt.strftime("%Y年%m月")
 
-# 绘图
+# ==================== 绘图：柱形 + 双折线 ====================
 import plotly.graph_objects as go
 fig_delay = go.Figure()
 
-# 平均逾期天数
+# 👇 柱形图：逾期订单数
+fig_delay.add_trace(go.Bar(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["逾期订单数"],
+    name="逾期订单数",
+    marker_color="#FF9900",
+    opacity=0.8
+))
+
+# 👇 折线：平均逾期天数
 fig_delay.add_trace(go.Scatter(
     x=df_delay_stat["到货月份_中文"],
     y=df_delay_stat["平均逾期天数"],
@@ -1429,11 +1438,12 @@ fig_delay.add_trace(go.Scatter(
     mode="lines+markers+text",
     text=df_delay_stat["平均逾期天数"],
     textposition="top center",
-    line=dict(color="#FF7F0E", width=3),
-    marker=dict(size=6)
+    line=dict(color="#E64A19", width=3),
+    marker=dict(size=6),
+    yaxis="y2"
 ))
 
-# 最长逾期天数
+# 👇 折线：最长逾期天数
 fig_delay.add_trace(go.Scatter(
     x=df_delay_stat["到货月份_中文"],
     y=df_delay_stat["最长逾期天数"],
@@ -1441,18 +1451,21 @@ fig_delay.add_trace(go.Scatter(
     mode="lines+markers+text",
     text=df_delay_stat["最长逾期天数"],
     textposition="bottom center",
-    line=dict(color="#E74C3C", width=3, dash="dot"),
-    marker=dict(size=6)
+    line=dict(color="#C0392B", width=3, dash="dot"),
+    marker=dict(size=6),
+    yaxis="y2"
 ))
 
+# 双轴设置（左：订单数，右：逾期天数）
 fig_delay.update_layout(
-    height=400,
-    title_text="逾期深度趋势（受筛选器控制）",
+    height=420,
+    title_text="逾期趋势：订单量 + 逾期天数",
     template="plotly_white",
     legend_orientation="h",
     legend_y=-0.2,
     xaxis_title="到货月份",
-    yaxis_title="逾期天数"
+    yaxis=dict(title="逾期订单数"),
+    yaxis2=dict(title="逾期天数", overlaying="y", side="right"),
 )
 
 st.plotly_chart(fig_delay, use_container_width=True)
