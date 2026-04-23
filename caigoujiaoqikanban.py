@@ -1274,7 +1274,6 @@ for idx, status in enumerate(status_sort):
 
 
 # =========================================================
-# =========================================================
 # 🌟 多月趋势分析：订单数堆叠柱状图 + 准时率折线图（中文坐标+数值标签版）
 # =========================================================
 st.markdown("---")
@@ -1285,15 +1284,60 @@ df_trend = df.copy()
 df_trend["到货年月"] = pd.to_datetime(df_trend["到货年月"]).dt.to_period("M")
 df_trend["到货年月_str"] = df_trend["到货年月"].astype(str)
 
-# 1️⃣ 快捷筛选
+# ========================================================================
+# 🌟 新增：所有厂家 总结卡片（顶部展示）
+# ========================================================================
+st.subheader("🏭 全厂家履约总结卡片")
+df_factory_summary = df_trend.groupby("厂家").agg(
+    总订单数=("采购单号", "count"),
+    准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
+    平均交期=("实际采购交期", "mean"),
+    总采购量=("采购量", "sum")
+).reset_index()
+
+df_factory_summary["准时率%"] = (
+    df_factory_summary["准时订单数"] / df_factory_summary["总订单数"] * 100
+).round(1)
+
+# 评级
+def get_level(rate):
+    if rate >= 90:
+        return "✅ 优质", "#f0fdf4", "#22c55e"
+    elif rate >= 80:
+        return "⚠️ 合格", "#fffbeb", "#f59e0b"
+    else:
+        return "🔴 异常", "#fef2f2", "#ef4444"
+
+# 一行4列卡片
+cols = st.columns(4)
+card_idx = 0
+for _, row in df_factory_summary.iterrows():
+    level_name, bg, bd = get_level(row["准时率%"])
+    with cols[card_idx % 4]:
+        st.markdown(f"""
+<div style="background:{bg}; border:2px solid {bd}; border-radius:12px; padding:16px; margin-bottom:14px;">
+<b>{row['厂家']}</b><br>
+准时率：{row['准时率%']}% {level_name}<br>
+订单：{int(row['总订单数'])} 单<br>
+准时：{int(row['准时订单数'])} 单｜逾期：{int(row['逾期订单数'])} 单<br>
+总采购量：{int(row['总采购量'])} 件
+</div>
+""", unsafe_allow_html=True)
+    card_idx += 1
+
+st.markdown("---")
+
+# ========================================================================
+# 筛选器（控制下面所有图表）
+# ========================================================================
+# 1️⃣ 快捷时间筛选
 time_option = st.selectbox("⏱️ 快捷时间筛选", ["自定义筛选范围", "近三个月", "近半年", "近一年"])
 
-# 获取所有可选择的月份（排序）
 all_periods = sorted(df_trend["到货年月"].unique())
 all_dates_str = [p.strftime("%Y-%m") for p in all_periods]
-
-# 2️⃣ 快捷筛选逻辑
 end_date_def = all_periods[-1]
+
 if time_option == "近三个月":
     start_date_def = end_date_def - 2
 elif time_option == "近半年":
@@ -1303,33 +1347,31 @@ elif time_option == "近一年":
 else:
     start_date_def = all_periods[0]
 
-# 3️⃣ 时间范围选择器
+# 2️⃣ 时间范围
 col1, col2 = st.columns(2)
 with col1:
     start_date = st.selectbox("开始时间", all_dates_str, index=all_dates_str.index(start_date_def.strftime("%Y-%m")))
 with col2:
     end_date = st.selectbox("结束时间", all_dates_str, index=all_dates_str.index(end_date_def.strftime("%Y-%m")))
 
-# 4️⃣ 厂家筛选器 —— 【已改为 单选下拉框，默认全部】
+# 3️⃣ 厂家筛选器（单选，控制下面所有图表）
 supplier_list = ["全部厂家"] + sorted(df_trend["厂家"].dropna().unique().tolist())
-selected_supplier = st.selectbox("🏭 筛选厂家", supplier_list)
+selected_supplier = st.selectbox("🏭 选择要分析的厂家", supplier_list)
 
-# =========================================================
-# 数据筛选
-# =========================================================
+# ========================================================================
+# 数据过滤（下面所有图都用这个 df_filter）
+# ========================================================================
 df_filter = df_trend.copy()
 df_filter["到货年月"] = df_filter["到货年月"].astype(str)
-
-# 时间过滤
 df_filter = df_filter[(df_filter["到货年月"] >= start_date) & (df_filter["到货年月"] <= end_date)]
 
-# 厂家过滤（单选版本）
 if selected_supplier != "全部厂家":
     df_filter = df_filter[df_filter["厂家"] == selected_supplier]
 
-# =========================================================
-# 按月统计
-# =========================================================
+# ========================================================================
+# 1. 履约趋势图（准时率+订单）
+# ========================================================================
+st.subheader("📊 履约趋势：订单结构 + 准时率")
 df_stat = df_filter.groupby("到货年月_str").agg(
     总订单数=("采购单号", "count"),
     准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
@@ -1338,142 +1380,87 @@ df_stat = df_filter.groupby("到货年月_str").agg(
 
 df_stat["准时率%"] = (df_stat["准时订单数"] / df_stat["总订单数"] * 100).round(1)
 df_stat = df_stat.sort_values("到货年月_str")
-
-# ===================== 横坐标转为中文日期 =====================
 df_stat["到货月份_中文"] = pd.to_datetime(df_stat["到货年月_str"]).dt.strftime("%Y年%m月")
 
-# =========================================================
-# 📊 绘制组合图（中文坐标 + 全部数值直接显示在图上）
-# =========================================================
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-
 fig = make_subplots(specs=[[{"secondary_y": True}]])
+fig.add_trace(go.Bar(x=df_stat["到货月份_中文"], y=df_stat["准时订单数"], name="准时/提前", marker_color="#27AE60", text=df_stat["准时订单数"]), secondary_y=False)
+fig.add_trace(go.Bar(x=df_stat["到货月份_中文"], y=df_stat["逾期订单数"], name="逾期", marker_color="#E74C3C", text=df_stat["逾期订单数"]), secondary_y=False)
+fig.add_trace(go.Scatter(x=df_stat["到货月份_中文"], y=df_stat["准时率%"], name="准时率%", mode="lines+markers+text", text=[f"{v}%" for v in df_stat["准时率%"]], marker_color="#3498DB", line=dict(width=3)), secondary_y=True)
 
-# 1. 准时订单数（绿色柱子 + 显示数值）
-fig.add_trace(go.Bar(
-    x=df_stat["到货月份_中文"], y=df_stat["准时订单数"],
-    name="准时/提前订单数", marker_color="#27AE60",
-    text=df_stat["准时订单数"], textposition="auto"
-), secondary_y=False)
-
-# 2. 逾期订单数（红色柱子 + 显示数值）
-fig.add_trace(go.Bar(
-    x=df_stat["到货月份_中文"], y=df_stat["逾期订单数"],
-    name="逾期订单数", marker_color="#E74C3C",
-    text=df_stat["逾期订单数"], textposition="auto"
-), secondary_y=False)
-
-# 3. 准时率折线（蓝色+数值标签）
-fig.add_trace(go.Scatter(
-    x=df_stat["到货月份_中文"], y=df_stat["准时率%"],
-    name="准时率%", mode="lines+markers+text",
-    text=[f"{v}%" for v in df_stat["准时率%"]],
-    textposition="top center",
-    marker_color="#3498DB", line=dict(width=3)
-), secondary_y=True)
-
-# 图表样式
-fig.update_layout(
-    barmode="stack",
-    height=500,
-    title_text=f"履约趋势：{start_date} ~ {end_date}",
-    template="plotly_white",
-    legend_orientation="h",
-    legend_y=-0.2,
-    xaxis_title="到货月份",
-    yaxis_title="订单数"
-)
-
-# 右Y轴：准时率
+fig.update_layout(barmode="stack", height=460, title=f"{selected_supplier} 履约趋势", template="plotly_white", legend_orientation="h", legend_y=-0.2, xaxis_title="到货月份", yaxis_title="订单数")
 fig.update_yaxes(title_text="准时率 (%)", secondary_y=True, range=[0, 105])
-
 st.plotly_chart(fig, use_container_width=True)
 
-# =========================================================
-# 数据核对表格
-# =========================================================
-with st.expander("📄 查看统计数据"):
-    st.dataframe(df_stat.rename(columns={
-        "到货月份_中文":"到货月份", "准时订单数":"准时数", "逾期订单数":"逾期数",
-        "总订单数":"总订单", "准时率%":"准时率"
-    })[["到货月份","总订单","准时数","逾期数","准时率"]],
-    use_container_width=True, hide_index=True)
-
-# =========================================================
-# 🌟 逾期深度趋势分析（柱形：逾期订单数 + 折线：平均/最长逾期天数）
-# 适配列名：预计-实际交期的差值（负数=逾期）
-# =========================================================
-st.subheader("📅 逾期深度趋势（逾期订单量 + 天数）")
-
-# 统计逾期深度
+# ========================================================================
+# 2. 逾期深度趋势
+# ========================================================================
+st.subheader("📅 逾期深度趋势（订单量 + 天数）")
 df_delay_stat = df_filter.groupby("到货年月_str").agg(
     总订单数=("采购单号", "count"),
     逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
     平均逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).mean().round(1) if (x < 0).any() else 0),
     最长逾期天数=("预计-实际交期的差值", lambda x: abs(x[x < 0]).max() if (x < 0).any() else 0)
 ).reset_index()
-
 df_delay_stat = df_delay_stat.sort_values("到货年月_str")
 df_delay_stat["到货月份_中文"] = pd.to_datetime(df_delay_stat["到货年月_str"]).dt.strftime("%Y年%m月")
 
-# ==================== 绘图：柱形 + 双折线 ====================
-import plotly.graph_objects as go
 fig_delay = go.Figure()
+fig_delay.add_trace(go.Bar(x=df_delay_stat["到货月份_中文"], y=df_delay_stat["逾期订单数"], name="逾期订单数", marker_color="#FF9900", opacity=0.8))
+fig_delay.add_trace(go.Scatter(x=df_delay_stat["到货月份_中文"], y=df_delay_stat["平均逾期天数"], name="平均逾期天数", mode="lines+markers+text", text=df_delay_stat["平均逾期天数"], line=dict(color="#E64A19", width=3), yaxis="y2"))
+fig_delay.add_trace(go.Scatter(x=df_delay_stat["到货月份_中文"], y=df_delay_stat["最长逾期天数"], name="最长逾期天数", mode="lines+markers+text", text=df_delay_stat["最长逾期天数"], line=dict(color="#C0392B", width=3, dash="dot"), yaxis="y2"))
 
-# 👇 柱形图：逾期订单数
-fig_delay.add_trace(go.Bar(
-    x=df_delay_stat["到货月份_中文"],
-    y=df_delay_stat["逾期订单数"],
-    name="逾期订单数",
-    marker_color="#FF9900",
-    opacity=0.8
-))
-
-# 👇 折线：平均逾期天数
-fig_delay.add_trace(go.Scatter(
-    x=df_delay_stat["到货月份_中文"],
-    y=df_delay_stat["平均逾期天数"],
-    name="平均逾期天数",
-    mode="lines+markers+text",
-    text=df_delay_stat["平均逾期天数"],
-    textposition="top center",
-    line=dict(color="#E64A19", width=3),
-    marker=dict(size=6),
-    yaxis="y2"
-))
-
-# 👇 折线：最长逾期天数
-fig_delay.add_trace(go.Scatter(
-    x=df_delay_stat["到货月份_中文"],
-    y=df_delay_stat["最长逾期天数"],
-    name="最长逾期天数",
-    mode="lines+markers+text",
-    text=df_delay_stat["最长逾期天数"],
-    textposition="bottom center",
-    line=dict(color="#C0392B", width=3, dash="dot"),
-    marker=dict(size=6),
-    yaxis="y2"
-))
-
-# 双轴设置（左：订单数，右：逾期天数）
-fig_delay.update_layout(
-    height=420,
-    title_text="逾期趋势：订单量 + 逾期天数",
-    template="plotly_white",
-    legend_orientation="h",
-    legend_y=-0.2,
-    xaxis_title="到货月份",
-    yaxis=dict(title="逾期订单数"),
-    yaxis2=dict(title="逾期天数", overlaying="y", side="right"),
-)
-
+fig_delay.update_layout(height=420, title=f"{selected_supplier} 逾期趋势", template="plotly_white", legend_orientation="h", legend_y=-0.2, xaxis_title="到货月份", yaxis=dict(title="逾期订单数"), yaxis2=dict(title="逾期天数", overlaying="y", side="right"))
 st.plotly_chart(fig_delay, use_container_width=True)
 
-# 数据核对
-with st.expander("📄 查看逾期深度数据"):
-    st.dataframe(
-        df_delay_stat[["到货月份_中文", "总订单数", "逾期订单数", "平均逾期天数", "最长逾期天数"]]
-        .rename(columns={"到货月份_中文":"到货月份"}),
-        use_container_width=True, hide_index=True
-    )
+# ========================================================================
+# 3. 新增：订单量 + 采购量趋势（合作深度）
+# ========================================================================
+st.subheader("📦 订单量 & 采购量趋势（合作深度）")
+df_volume = df_filter.groupby("到货年月_str").agg(
+    总订单数=("采购单号", "count"),
+    总采购量=("采购量", "sum")
+).reset_index()
+df_volume = df_volume.sort_values("到货年月_str")
+df_volume["到货月份_中文"] = pd.to_datetime(df_volume["到货年月_str"]).dt.strftime("%Y年%m月")
+
+fig_vol = make_subplots(specs=[[{"secondary_y": True}]])
+fig_vol.add_trace(go.Bar(x=df_volume["到货月份_中文"], y=df_volume["总订单数"], name="总订单数", marker_color="#2980B9"), secondary_y=False)
+fig_vol.add_trace(go.Scatter(x=df_volume["到货月份_中文"], y=df_volume["总采购量"], name="总采购量", mode="lines+markers+text", text=df_volume["总采购量"], line=dict(color="#8E44AD", width=3)), secondary_y=True)
+
+fig_vol.update_layout(height=420, title=f"{selected_supplier} 订单&采购量趋势", template="plotly_white", legend_orientation="h", legend_y=-0.2, xaxis_title="月份")
+fig_vol.update_yaxes(title_text="订单数", secondary_y=False)
+fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
+st.plotly_chart(fig_vol, use_container_width=True)
+
+# ========================================================================
+# 4. 新增：产能负载率趋势
+# ========================================================================
+st.subheader("⚖️ 产能负载率月度趋势（是否可加单）")
+max_pur = df_volume["总采购量"].max()
+if max_pur > 0:
+    df_volume["负载率%"] = (df_volume["总采购量"] / max_pur * 100).round(1)
+else:
+    df_volume["负载率%"] = 0
+
+fig_load = go.Figure()
+fig_load.add_trace(go.Scatter(
+    x=df_volume["到货月份_中文"], y=df_volume["负载率%"],
+    mode="lines+markers+text", text=[f"{v}%" for v in df_volume["负载率%"]],
+    line=dict(color="#E67E22", width=4), marker=dict(size=8)
+))
+fig_load.update_layout(height=400, title=f"{selected_supplier} 产能负载率", template="plotly_white", xaxis_title="月份", yaxis_title="负载率 %", yaxis_range=[0, 110])
+st.plotly_chart(fig_load, use_container_width=True)
+
+# ========================================================================
+# 5. 新增：履约等级变化趋势
+# ========================================================================
+st.subheader("🏅 履约等级月度变化")
+df_stat["履约等级"] = df_stat["准时率%"].apply(lambda x: "优质" if x>=90 else "合格" if x>=80 else "异常")
+fig_level = go.Figure()
+fig_level.add_trace(go.Scatter(
+    x=df_stat["到货月份_中文"], y=df_stat["准时率%"],
+    mode="lines+markers+text", text=df_stat["履约等级"],
+    textposition="top center", line=dict(color="#27AE60", width=3)
+))
+fig_level.update_layout(height=420, title=f"{selected_supplier} 履约等级变化", template="plotly_white", yaxis_range=[0, 105], yaxis_title="准时率 %", xaxis_title="月份")
+st.plotly_chart(fig_level, use_container_width=True)
