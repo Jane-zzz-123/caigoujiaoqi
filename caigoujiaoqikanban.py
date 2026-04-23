@@ -1399,3 +1399,69 @@ with st.expander("📄 查看统计数据"):
         "总订单数":"总订单", "准时率%":"准时率"
     })[["到货月份","总订单","准时数","逾期数","准时率"]],
     use_container_width=True, hide_index=True)
+    
+# =========================================================
+# 🌟 新增：逾期深度趋势分析（平均逾期天数 + 最长逾期天数）
+# 适配你的数据：逾期天数 = 采购交期 - 实际采购交期（负数=逾期）
+# =========================================================
+st.subheader("📅 逾期深度趋势（平均逾期天数 / 最长逾期天数）")
+
+# 统计逾期深度（基于已筛选的数据 df_filter）
+df_delay_stat = df_filter.groupby("到货年月_str").agg(
+    总订单数=("采购单号", "count"),
+    逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
+    # 只取负数（逾期），取绝对值后计算平均/最大值
+    平均逾期天数=("逾期天数", lambda x: abs(x[x < 0]).mean().round(1) if (x < 0).any() else 0),
+    最长逾期天数=("逾期天数", lambda x: abs(x[x < 0]).max() if (x < 0).any() else 0)
+).reset_index()
+
+df_delay_stat = df_delay_stat.sort_values("到货年月_str")
+df_delay_stat["到货月份_中文"] = pd.to_datetime(df_delay_stat["到货年月_str"]).dt.strftime("%Y年%m月")
+
+# 绘图：双折线趋势图
+import plotly.graph_objects as go
+fig_delay = go.Figure()
+
+# 平均逾期天数
+fig_delay.add_trace(go.Scatter(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["平均逾期天数"],
+    name="平均逾期天数",
+    mode="lines+markers+text",
+    text=df_delay_stat["平均逾期天数"],
+    textposition="top center",
+    line=dict(color="#FF7F0E", width=3),
+    marker=dict(size=6)
+))
+
+# 最长逾期天数
+fig_delay.add_trace(go.Scatter(
+    x=df_delay_stat["到货月份_中文"],
+    y=df_delay_stat["最长逾期天数"],
+    name="最长逾期天数",
+    mode="lines+markers+text",
+    text=df_delay_stat["最长逾期天数"],
+    textposition="bottom center",
+    line=dict(color="#E74C3C", width=3, dash="dot"),
+    marker=dict(size=6)
+))
+
+fig_delay.update_layout(
+    height=400,
+    title_text="逾期深度趋势（受筛选器控制）",
+    template="plotly_white",
+    legend_orientation="h",
+    legend_y=-0.2,
+    xaxis_title="到货月份",
+    yaxis_title="逾期天数"
+)
+
+st.plotly_chart(fig_delay, use_container_width=True)
+
+# 数据核对
+with st.expander("📄 查看逾期深度数据"):
+    st.dataframe(
+        df_delay_stat[["到货月份_中文", "总订单数", "逾期订单数", "平均逾期天数", "最长逾期天数"]]
+        .rename(columns={"到货月份_中文":"到货月份"}),
+        use_container_width=True, hide_index=True
+    )
