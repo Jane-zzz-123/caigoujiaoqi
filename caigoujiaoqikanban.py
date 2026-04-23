@@ -79,7 +79,7 @@ st.markdown("---")
 current_total = len(df_current)
 current_on_time = len(df_current[df_current["交期状态"] == "提前/准时"])
 current_overdue = len(df_current[df_current["交期状态"] == "逾期"])
-current_on_time_rate = (current_on_time / current_total * 100) if current_total > 0 else 0.0
+current_on_time_rate = (current_on_time / current_total * 100) if (current_total > 0 and not pd.isna(current_total)) else 0.0
 current_diff_avg = df_current["预计-实际交期的差值"].mean() if current_total > 0 else 0.0
 
 current_qty = df_current["采购量"].sum()
@@ -518,7 +518,10 @@ if not df_current.empty:
         逾期订单=("交期状态", lambda x: (x == "逾期").sum())
     ).reset_index()
 
-    factory_df["准时率(%)"] = (factory_df["提前准时订单"] / factory_df["PO单数"] * 100).round(2)
+    factory_df["准时率(%)"] = (
+        (factory_df["提前准时订单"].astype(np.float64) /
+         factory_df["PO单数"].replace(0, np.nan).astype(np.float64) * 100)
+    ).round(2).fillna(0.0)
     jq_df = df_current.groupby("厂家").agg(
         平均交期差值=("预计-实际交期的差值", "mean"),
         最短实际交期=("实际采购交期", "min"),
@@ -578,7 +581,11 @@ if not df_current.empty:
 # -------------------------- 逾期分析 --------------------------
 # -------------------------- 厂家履约评级分析（按准时率） --------------------------
 st.subheader("⚠️ 厂家履约评级分析（按准时率）")
-
+# 新增：过滤空值 + 仅保留有效数据行
+df_valid = df_current[
+    df_current["厂家"].notna() &  # 过滤空厂家
+    df_current["采购单号"].notna()  # 过滤空订单号
+].copy()
 # 计算所有厂家指标（新增：采购量、到货量）
 factory_analysis = df_current.groupby("厂家").agg(
     订单总数=("采购单号", "count"),
@@ -595,7 +602,11 @@ total_purchase = factory_analysis["采购量合计"].sum()
 total_arrival = factory_analysis["到货量合计"].sum()
 
 # 计算指标
-factory_analysis["准时率"] = (factory_analysis["准时订单数"] / factory_analysis["订单总数"] * 100).round(1)
+# 修复：处理除数为0 + 转换为numpy数组避免Arrow类型问题
+factory_analysis["准时率"] = (
+    (factory_analysis["准时订单数"].astype(np.float64) /
+     factory_analysis["订单总数"].replace(0, np.nan).astype(np.float64) * 100)
+).round(1).fillna(0.0)  # 0值替换为NaN再计算，最后填充0
 factory_analysis["订单占比"] = (factory_analysis["订单总数"] / factory_analysis["订单总数"].sum() * 100).round(1)
 factory_analysis["采购量占比"] = (factory_analysis["采购量合计"] / total_purchase * 100).round(2)
 factory_analysis["到货量占比"] = (factory_analysis["到货量合计"] / total_arrival * 100).round(2)
