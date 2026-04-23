@@ -1586,23 +1586,63 @@ fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
 # ========================================================================
-# 4. 产能负载率趋势
+# 🌟 每月真实产能趋势（你想要的：每个月产能多少、区间多少）
+# 不再算百分比！只看真实产能！
 # ========================================================================
-st.subheader("⚖️ 产能负载率月度趋势（是否可加单）")
-max_pur = df_volume["总采购量"].max()
-if max_pur > 0:
-    df_volume["负载率%"] = (df_volume["总采购量"] / max_pur * 100).round(1)
-else:
-    df_volume["负载率%"] = 0
+st.subheader("📦 每月真实产能趋势（件）")
 
-fig_load = go.Figure()
-fig_load.add_trace(go.Scatter(
-    x=df_volume["到货月份_中文"], y=df_volume["负载率%"],
-    mode="lines+markers+text", text=[f"{v}%" for v in df_volume["负载率%"]],
-    line=dict(color="#E67E22", width=4), marker=dict(size=8)
+# 1. 按月统计真实产能 = 每月到货采购量（真实产能）
+df_monthly_cap = df_filter.groupby(["到货年月_str"], as_index=False).agg(
+    当月产能=("采购量", "sum")  # 这个就是每月真实产出
+).sort_values("到货年月_str")
+
+df_monthly_cap["到货月份_中文"] = pd.to_datetime(
+    df_monthly_cap["到货年月_str"]
+).dt.strftime("%Y年%m月")
+
+# 2. 计算产能波动区间（用来判断稳定度）
+min_cap = df_monthly_cap["当月产能"].min()
+max_cap = df_monthly_cap["当月产能"].max()
+avg_cap = df_monthly_cap["当月产能"].mean()
+
+# 3. 画真实产能折线图
+fig_cap = go.Figure()
+
+fig_cap.add_trace(go.Scatter(
+    x=df_monthly_cap["到货月份_中文"],
+    y=df_monthly_cap["当月产能"],
+    mode="lines+markers+text",
+    text=df_monthly_cap["当月产能"],
+    textposition="top center",
+    line=dict(width=3, color="#3498db"),
+    name="每月真实产能"
 ))
-fig_load.update_layout(height=400, title=f"{selected_supplier} 产能负载率", template="plotly_white", xaxis_title="月份", yaxis_title="负载率 %", yaxis_range=[0, 110])
-st.plotly_chart(fig_load, use_container_width=True)
+
+# 平均产能线（参考基准）
+fig_cap.add_trace(go.Scatter(
+    x=df_monthly_cap["到货月份_中文"],
+    y=[avg_cap] * len(df_monthly_cap),
+    mode="lines",
+    line=dict(color="#2ecc71", dash="dash"),
+    name=f"平均产能 {avg_cap:.0f} 件"
+))
+
+fig_cap.update_layout(
+    height=400,
+    title=f"{selected_supplier} | 每月真实产能（件）",
+    xaxis_title="月份",
+    yaxis_title="产能（件）",
+    template="plotly_white"
+)
+
+st.plotly_chart(fig_cap, use_container_width=True)
+
+# 4. 直接告诉你产能范围（你要的结论）
+st.success(f"""
+📊 产能区间总结：
+• 平均月产能：**{avg_cap:.0f} 件**
+• 产能波动范围：**{min_cap:.0f} ~ {max_cap:.0f} 件**
+""")
 
 # ========================================================================
 # 5. 履约等级变化趋势
