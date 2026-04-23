@@ -1452,10 +1452,36 @@ df_trend["到货年月"] = pd.to_datetime(df_trend["到货年月"]).dt.to_period
 df_trend["到货年月_str"] = df_trend["到货年月"].astype(str)
 
 # ========================================================================
-# 🌟 新增：所有厂家 总结卡片（顶部展示）
+# 🌟 筛选区移到最顶部（时间多选 + 厂家筛选）
+# ========================================================================
+st.subheader("🔍 筛选条件")
+
+# 1. 月份多选框（默认全选）
+all_months = sorted(df_trend["到货年月_str"].unique())
+selected_months = st.multiselect("🗓️ 选择月份（可多选）", all_months, default=all_months)
+
+# 2. 厂家单选筛选器
+supplier_list = ["全部厂家"] + sorted(df_trend["厂家"].dropna().unique().tolist())
+selected_supplier = st.selectbox("🏭 选择要分析的厂家", supplier_list)
+
+st.markdown("---")
+
+# ========================================================================
+# 数据过滤（统一过滤，全局生效）
+# ========================================================================
+df_filter = df_trend.copy()
+df_filter = df_filter[df_filter["到货年月_str"].isin(selected_months)]  # 多选月份过滤
+
+if selected_supplier != "全部厂家":
+    df_filter = df_filter[df_filter["厂家"] == selected_supplier]
+
+# ========================================================================
+# 🌟 所有厂家 总结卡片（现在在筛选器下方）
 # ========================================================================
 st.subheader("🏭 全厂家履约总结卡片")
-df_factory_summary = df_trend.groupby("厂家").agg(
+
+# 基于已筛选数据统计卡片
+df_factory_summary = df_filter.groupby("厂家").agg(
     总订单数=("采购单号", "count"),
     准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
     逾期订单数=("交期状态", lambda x: (x == "逾期").sum()),
@@ -1494,46 +1520,6 @@ for _, row in df_factory_summary.iterrows():
     card_idx += 1
 
 st.markdown("---")
-
-# ========================================================================
-# 筛选器（控制下面所有图表）
-# ========================================================================
-# 1️⃣ 快捷时间筛选
-time_option = st.selectbox("⏱️ 快捷时间筛选", ["自定义筛选范围", "近三个月", "近半年", "近一年"])
-
-all_periods = sorted(df_trend["到货年月"].unique())
-all_dates_str = [p.strftime("%Y-%m") for p in all_periods]
-end_date_def = all_periods[-1]
-
-if time_option == "近三个月":
-    start_date_def = end_date_def - 2
-elif time_option == "近半年":
-    start_date_def = end_date_def - 5
-elif time_option == "近一年":
-    start_date_def = end_date_def - 11
-else:
-    start_date_def = all_periods[0]
-
-# 2️⃣ 时间范围
-col1, col2 = st.columns(2)
-with col1:
-    start_date = st.selectbox("开始时间", all_dates_str, index=all_dates_str.index(start_date_def.strftime("%Y-%m")))
-with col2:
-    end_date = st.selectbox("结束时间", all_dates_str, index=all_dates_str.index(end_date_def.strftime("%Y-%m")))
-
-# 3️⃣ 厂家筛选器（单选，控制下面所有图表）
-supplier_list = ["全部厂家"] + sorted(df_trend["厂家"].dropna().unique().tolist())
-selected_supplier = st.selectbox("🏭 选择要分析的厂家", supplier_list)
-
-# ========================================================================
-# 数据过滤（下面所有图都用这个 df_filter）
-# ========================================================================
-df_filter = df_trend.copy()
-df_filter["到货年月"] = df_filter["到货年月"].astype(str)
-df_filter = df_filter[(df_filter["到货年月"] >= start_date) & (df_filter["到货年月"] <= end_date)]
-
-if selected_supplier != "全部厂家":
-    df_filter = df_filter[df_filter["厂家"] == selected_supplier]
 
 # ========================================================================
 # 1. 履约趋势图（准时率+订单）
@@ -1580,7 +1566,7 @@ fig_delay.update_layout(height=420, title=f"{selected_supplier} 逾期趋势", t
 st.plotly_chart(fig_delay, use_container_width=True)
 
 # ========================================================================
-# 3. 新增：订单量 + 采购量趋势（合作深度）
+# 3. 订单量 + 采购量趋势（合作深度）
 # ========================================================================
 st.subheader("📦 订单量 & 采购量趋势（合作深度）")
 df_volume = df_filter.groupby("到货年月_str").agg(
@@ -1600,7 +1586,7 @@ fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
 # ========================================================================
-# 4. 新增：产能负载率趋势
+# 4. 产能负载率趋势
 # ========================================================================
 st.subheader("⚖️ 产能负载率月度趋势（是否可加单）")
 max_pur = df_volume["总采购量"].max()
@@ -1619,7 +1605,7 @@ fig_load.update_layout(height=400, title=f"{selected_supplier} 产能负载率",
 st.plotly_chart(fig_load, use_container_width=True)
 
 # ========================================================================
-# 5. 新增：履约等级变化趋势
+# 5. 履约等级变化趋势
 # ========================================================================
 st.subheader("🏅 履约等级月度变化")
 df_stat["履约等级"] = df_stat["准时率%"].apply(lambda x: "优质" if x>=90 else "合格" if x>=80 else "异常")
