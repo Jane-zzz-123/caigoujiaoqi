@@ -768,20 +768,18 @@ else:
 
 
 
-# ====================== 新增：时间筛选器（评估月份 + 数据范围） ======================
 st.subheader("🎯 厂家+类目明细 采购交期分位数分析 & 修改建议")
 st.markdown("### ⏱ 订单时间筛选设置")
 col1, col2 = st.columns(2)
 
-# ================ 【修改点1】获取所有月份，默认全选 ================
+# 获取所有月份、默认全选
 all_months = sorted(df["到货年月"].dropna().unique(), reverse=True)
 
 with col1:
-    # 改成多选，默认全部选中
     eval_months = st.multiselect(
         "选择订单的评估月份（可多选）",
         options=all_months,
-        default=all_months  # 默认全选
+        default=all_months
     )
 
 with col2:
@@ -794,41 +792,57 @@ with col2:
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# ================ 【修改点2】兼容多选月份，取最大月份作为基准 ================
+# 空选拦截
 if not eval_months:
-    st.warning("请至少选择一个月份")
+    st.warning("⚠️ 请至少选择一个评估月份")
     st.stop()
 
-# 取选中的最大月份作为评估基准
-eval_month = max(eval_months)
-eval_date = datetime.strptime(str(eval_month), "%Y-%m")
+# 选中月份里的最新（最大）月份，作为时间锚点
+latest_selected_month = max(eval_months)
+latest_date = datetime.strptime(str(latest_selected_month), "%Y-%m")
 
+# 【核心修复】重新定义履约统计时间窗口
 if date_range == "仅选择月份":
-    s_date = eval_date
-    e_date = eval_date
+    # 用你勾选的所有月份作为履约统计范围
+    filter_months = eval_months
+    start_str = min(filter_months)
+    end_str = max(filter_months)
 elif date_range == "近三个月":
-    s_date = eval_date - relativedelta(months=2)
-    e_date = eval_date
-else:
-    s_date = eval_date - relativedelta(months=5)
-    e_date = eval_date
+    # 以选中最晚月为终点，完整往前追溯3个月
+    s_date = latest_date - relativedelta(months=2)
+    e_date = latest_date
+    start_str = s_date.strftime("%Y-%m")
+    end_str = e_date.strftime("%Y-%m")
+    # 筛选窗口内全部历史月份
+    all_window_months = sorted(df["到货年月"].dropna().unique())
+    filter_months = [m for m in all_window_months if start_str <= m <= end_str]
+else: # 近半年
+    # 以选中最晚月为终点，完整往前追溯6个月
+    s_date = latest_date - relativedelta(months=5)
+    e_date = latest_date
+    start_str = s_date.strftime("%Y-%m")
+    end_str = e_date.strftime("%Y-%m")
+    all_window_months = sorted(df["到货年月"].dropna().unique())
+    filter_months = [m for m in all_window_months if start_str <= m <= end_str]
 
-start_str = s_date.strftime("%Y-%m")
-end_str = e_date.strftime("%Y-%m")
 
-# ================ 【修改点3】筛选改为：在时间范围内 + 属于选中的月份 ================
+# 1、履约数据：按窗口范围统计
 df_actual = df[
-    (df["到货年月"] >= start_str) &
-    (df["到货年月"] <= end_str) &
-    (df["到货年月"].isin(eval_months))  # 只看你选中的月份
+    df["到货年月"].isin(filter_months)
 ].copy()
 
-# ✅ 【核心】当前采购交期均值：取【所有选中的月份】
-df_latest = df[df["到货年月"].isin(eval_months)].copy()
+# 2、当前采购交期：永远取自【你多选的全部评估月份】
+df_latest = df[
+    df["到货年月"].isin(eval_months)
+].copy()
 
-st.success(f"✅ 当前采购交期取自：{', '.join(eval_months)} | 实际履约统计：{start_str} ~ {end_str}")
+# 提示文案完全修正
+st.success(f"""
+✅ 当前采购交期取自：{', '.join(sorted(eval_months))}
+| 实际履约统计基准：{start_str} ~ {end_str}（共{len(filter_months)}个月）
+""")
 
-# -------------------------- 厂家+类目明细 交期分位数分析 & 修改建议 --------------------------
+# -------------------------- 后面原有全部逻辑无需改动，直接保留 --------------------------
 st.markdown("---")
 
 # 只保留有数据的组合
@@ -849,16 +863,16 @@ latest_mean = df_latest.groupby(["厂家", "厂家类目明细"]).agg(
     当前采购交期均值=("采购交期", "mean")
 ).reset_index()
 
-# 自定义：业务版分位计算（和你手工累计占比完全一样！）
+# 自定义：业务版分位计算
 def biz_quantile(series, q):
     s = series.dropna().sort_values().reset_index(drop=True)
     if len(s) == 0:
         return None
-    idx = int((len(s) * q) - 1e-9)  # 关键：向下取整找真实值
+    idx = int((len(s) * q) - 1e-9)
     idx = max(0, min(idx, len(s)-1))
     return s.iloc[idx]
 
-# ----------------- 正确分位计算（替换你原来的这段） -----------------
+# 分位计算
 actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
     实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
@@ -869,7 +883,7 @@ actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
 ).reset_index()
 
-# 3）合并两张表 → 最终表
+# 合并两张表
 quantile_stats = pd.merge(
     latest_mean,
     actual_stats,
@@ -887,8 +901,7 @@ for c in cols_round:
     quantile_stats[c] = quantile_stats[c].round(2)
 quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
-# 4）交期建议
-# 4. 生成采购交期修改建议（已全面优化话术+样本量逻辑）
+# 交期建议函数
 def get_delivery_advice(row, date_range):
     current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
@@ -897,18 +910,16 @@ def get_delivery_advice(row, date_range):
     rate = row["准时率"]
     sample = row["样本订单数"]
 
-    # 1. 动态样本量门槛
     if date_range == "仅选择月份":
         min_sample = 5
     elif date_range == "近三个月":
         min_sample = 5
-    else: # 近半年
+    else:
         min_sample = 5
 
     if sample < min_sample:
         return "⚠️ 样本数据太少，暂不提出修改建议"
 
-    # 2. 根据准时率匹配对应参考基准分位
     if rate < 80:
         ref_q = q80
     elif 80 <= rate < 90:
@@ -916,12 +927,10 @@ def get_delivery_advice(row, date_range):
     else:
         ref_q = q90
 
-    # 3. 核心：2天以内全部判定为偏差不大，无需调整
     diff = abs(current - ref_q)
     if diff <= 2:
         return "✅ 偏差不大，现有交期合理，可继续保持"
 
-    # 4. 差值超过2天，再给出精准优化建议
     if rate >= 90:
         if current > ref_q:
             return f"✅ 履约优秀，可适度下调至{ref_q}天，提升整体周转效率"
@@ -941,13 +950,9 @@ def get_delivery_advice(row, date_range):
             return "🟡 当前交期较为宽松，可根据放量需求适度收紧"
 
 
-# 调用执行
 quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda x: get_delivery_advice(x, date_range), axis=1)
 
-# 5）卡片：一行4列
-# ✅ 一行4列 紧凑优化版卡片
-# ✅ 修复乱码 + 紧凑美观 一行4列卡片
-# 📋 各厂家+类目明细交期分析卡片 一行4列 最终极简美观版
+# 渲染卡片
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
 card_idx = 0
@@ -965,7 +970,6 @@ for _, row in quantile_stats.iterrows():
     q100 = row["实际交期100分位"]
     advice = row["采购交期修改建议"]
 
-    # 准时率对应卡片配色
     if rate >= 90:
         bg = "#f0fdf4"
         border = "#22c55e"
