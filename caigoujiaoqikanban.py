@@ -770,61 +770,47 @@ else:
 
 st.subheader("🎯 厂家+类目明细 采购交期分位数分析 & 修改建议")
 st.markdown("### ⏱ 订单时间筛选设置")
-col1, col2 = st.columns(2)
 
-# 自动获取所有有效月份
+# 只保留单列多选布局
 all_valid_months = sorted(df["到货年月"].dropna().unique(), reverse=True)
 
-# ==============================================
-# 🔒 自动找最新有数据的月份（兜底逻辑，解决你担心的问题）
-# ==============================================
+# 🔍 自动定位最近有有效采购交期的月份（兜底防空）
 latest_arrival_month = None
 for month_candidate in all_valid_months:
-    temp = df[df["到货年月"] == month_candidate]
-    if not temp.empty and temp["采购交期"].notna().sum() > 0:
+    temp_data = df[df["到货年月"] == month_candidate]
+    if not temp_data.empty and temp_data["采购交期"].notna().sum() > 0:
         latest_arrival_month = month_candidate
         break
 
-# 如果真的完全没数据（极端情况）
+# 极端无数据兜底拦截
 if latest_arrival_month is None:
-    st.error("⚠️ 全月份无有效采购交期数据")
+    st.error("⚠️ 暂无任何有效采购交期数据，无法进行分析")
     st.stop()
 
-# 多选月份（用于对比履约）
-with col1:
-    eval_months = st.multiselect(
-        "选择用于对比的历史月份（可多选）",
-        options=all_valid_months,
-        default=all_valid_months
-    )
-
-with col2:
-    date_range = st.selectbox(
-        "数据分析范围（用于计算实际履约）",
-        ["仅选择月份", "近三个月", "近半年"],
-        index=0
-    )
-
-from datetime import datetime
-from dateutil.relativedelta import relativedelta
+# 仅保留多选月份控件
+eval_months = st.multiselect(
+    "选择履约统计的历史月份（可多选，默认全选）",
+    options=all_valid_months,
+    default=all_valid_months
+)
 
 if not eval_months:
-    st.warning("请至少选择一个月份")
+    st.warning("⚠️ 请至少勾选1个月份用于履约统计")
     st.stop()
 
-# 实际履约 = 你选的月份
+# 口径定义（极简清晰）
+# 1. 实际履约数据 = 勾选的全部月份
 df_actual = df[df["到货年月"].isin(eval_months)].copy()
 start_str = min(eval_months)
 end_str = max(eval_months)
 
-# ==============================================
-# 🟢 核心：当前采购交期 = 最新有数据月份（永远不空）
-# ==============================================
+# 2. 当前基准交期 = 固定最新有效月份（永远不变）
 df_latest = df[df["到货年月"] == latest_arrival_month].copy()
 
+# 提示文案同步简化
 st.success(f"""
-✅ 当前采购交期取自【最近有效月份】：{latest_arrival_month}
-| 实际履约统计：{start_str} ~ {end_str}
+✅ 当前采购交期基准：固定取自【最新有效月份 {latest_arrival_month}】
+✅ 历史履约统计区间：{start_str} ~ {end_str}（已选{len(eval_months)}个月）
 """)
 
 # -------------------------- 以下完全不用改 --------------------------
