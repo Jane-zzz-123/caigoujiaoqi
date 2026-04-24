@@ -1052,18 +1052,13 @@ st.info("""
 """)
 # -------------------------- 定制字段格式 · 紧凑三列决策卡片 --------------------------
 st.markdown("---")
-# -------------------------- 读取 产品分类 表（统计在售产品数量） --------------------------
-# 读取产品表：统计 产品类型（新）的在售数量
-df_product = pd.read_excel(excel_file, sheet_name="产品分类")
-
-# 只算【是否在售 = 是】的数量
-df_product_on_sale = df_product[df_product["是否在售"] == "是"].copy()
-
-# 按【产品类型（新）】分组统计在售数量
-cate_product_count = df_product_on_sale.groupby("产品类型（新）").size().to_dict()
-
-# -------------------------- 下面是你原来的逻辑 + 我帮你加上数量显示 --------------------------
 st.subheader("💡 各品类采购下单建议")
+
+# ===================== 读取产品分类表（和你共用同一个 excel_file） =====================
+# 统计在售产品数量：按 产品类型（新）分组
+df_product = pd.read_excel(excel_file, sheet_name="产品分类")
+df_on_sale = df_product[df_product["是否在售"] == "是"].copy()
+prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
 
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
@@ -1076,9 +1071,9 @@ for i in range(0, len(cate_list), 3):
     for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
             with st.container(border=True):
-                # 品类标题 + 在售产品数量
-                prod_count = cate_product_count.get(cate, 0)
-                st.markdown(f"**📦 {cate}（在售产品：{prod_count} 款）**")
+                # 品类 + 在售数量（核心）
+                prod_num = prod_count_map.get(cate, 0)
+                st.markdown(f"**📦 {cate}（在售产品：{prod_num} 款）**")
 
                 # 1. 优质厂家
                 good_df = group_data[group_data["等级"] == "🟢 优质"]
@@ -1113,11 +1108,13 @@ for i in range(0, len(cate_list), 3):
                             f"准时率：{r['准时率%']}%"
                         )
 
-                # 风险提示（带在售数量，优先级更清晰）
+                # 风险提示（带数量，优先级明确）
                 if good_df.empty:
-                    st.info(f"💡 暂无优质供方｜在售 {prod_count} 款需开发新厂家")
+                    st.info(f"💡 暂无优质供方｜在售 {prod_num} 款需开发")
                 if group_data["厂家数"].iloc[0] == 1:
-                    st.warning(f"⚠️ 单一供应风险｜在售 {prod_count} 款仅 1 家供货")
+                    st.warning(f"⚠️ 单一供应风险｜在售 {prod_num} 款仅 1 家")
+
+# ===================== 结束 =====================
 
 # ====================== 科学优化版：近半年平均产能为基准 ======================
 st.markdown("---")
