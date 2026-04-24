@@ -414,20 +414,25 @@ else:
     cols = st.columns(3)
     idx = 0
 
+
     # 分区间专属渐变色卡
     def get_heat_color(days):
-        if 1 <= days <=3:
+        if 1 <= days <= 3:
             # 轻度 绿色渐变
-            return f"rgba(22, 163, 74, {0.4 + days*0.15})"
-        elif 4 <= days <=7:
+            return f"rgba(22, 163, 74, {0.4 + days * 0.15})"
+        elif 4 <= days <= 7:
             # 中度 橙色渐变
-            return f"rgba(245, 158, 11, {0.4 + (days-3)*0.15})"
-        elif 8 <= days <=15:
+            return f"rgba(245, 158, 11, {0.4 + (days - 3) * 0.15})"
+        elif 8 <= days <= 15:
             # 重度 橙红渐变
-            return f"rgba(239, 68, 68, {0.4 + (days-7)*0.08})"
+            return f"rgba(239, 68, 68, {0.4 + (days - 7) * 0.08})"
         else:
             # 极度 深红渐变
-            return f"rgba(127, 29, 29, {0.7 + min(days-16, 0.3)})"
+            return f"rgba(127, 29, 29, {0.7 + min(days - 16, 0.3)})"
+
+
+    # ===================== 固定等级顺序（你要的排序） =====================
+    level_order = ["轻度(1-3天)", "中度(4-7天)", "重度(8-15天)", "极度(>15天)"]
 
     # 遍历厂家渲染卡片
     for fac in factory_order:
@@ -440,43 +445,46 @@ else:
         fac_total_pur = fac_data_all["采购量"].sum()
 
         # 卡片整体底色
-        if max_day >15:
+        if max_day > 15:
             bg, bd = "#fee2e2", "#fecaca"
-        elif max_day>7:
+        elif max_day > 7:
             bg, bd = "#ffedd5", "#fed7aa"
-        elif max_day>3:
+        elif max_day > 3:
             bg, bd = "#fef9c3", "#fde047"
         else:
             bg, bd = "#dcfce7", "#bbf7d0"
 
-        with cols[idx %3]:
+        with cols[idx % 3]:
             # 卡片头部
             st.markdown(f"""
-            <div style="padding:16px; border-radius:12px; background:{bg}; border:1px solid {bd}; margin-bottom:14px;">
-            <div style="font-weight:bold; font-size:15px; margin-bottom:6px;">🏭 {fac}</div>
-            <div style="font-size:13px;">逾期订单：{total_order}单｜最长逾期：{max_day}天</div>
-            """, unsafe_allow_html=True)
+                <div style="padding:16px; border-radius:12px; background:{bg}; border:1px solid {bd}; margin-bottom:14px;">
+                <div style="font-weight:bold; font-size:15px; margin-bottom:6px;">🏭 {fac}</div>
+                <div style="font-size:13px;">逾期订单：{total_order}单｜最长逾期：{max_day}天</div>
+                """, unsafe_allow_html=True)
 
             # 1. 分层明细 + 新增采购量+占比
             color_lv = {
-                "轻度(1-3天)":"#16a34a",
-                "中度(4-7天)":"#f59e0b",
-                "重度(8-15天)":"#ea580c",
-                "极度(>15天)":"#dc2626"
+                "轻度(1-3天)": "#16a34a",
+                "中度(4-7天)": "#f59e0b",
+                "重度(8-15天)": "#ea580c",
+                "极度(>15天)": "#dc2626"
             }
-            for _, row in fac_sub.iterrows():
-                lv = row["逾期等级"]
-                cnt = row["订单数"]
-                avg = row["平均逾期显示"]
-                pur = row["采购量"]
-                pct = (pur / fac_total_pur *100).round(2)
-                c = color_lv[lv]
 
-                st.markdown(f"""
-                <div style="font-size:13px; margin:4px 0; color:{c};">
-                {lv}｜{cnt}单｜平均{avg}天（逾期采购量：{pur}，占比{pct}%）
-                </div>
-                """, unsafe_allow_html=True)
+            # ===================== 按固定顺序显示 =====================
+            for lv in level_order:
+                row = fac_sub[fac_sub["逾期等级"] == lv]
+                if not row.empty:
+                    cnt = row.iloc[0]["订单数"]
+                    avg = row.iloc[0]["平均逾期显示"]
+                    pur = row.iloc[0]["采购量"]
+                    pct = (pur / fac_total_pur * 100).round(2)
+                    c = color_lv[lv]
+
+                    st.markdown(f"""
+                        <div style="font-size:13px; margin:4px 0; color:{c};">
+                        {lv}｜{cnt}单｜平均{avg}天（逾期采购量：{pur}，占比{pct}%）
+                        </div>
+                        """, unsafe_allow_html=True)
 
             # 2. 定制渐变色热力条形图
             st.caption("📈 逾期天数-采购量热力分布")
@@ -487,6 +495,7 @@ else:
             heat_df["条形颜色"] = heat_df["逾期天数"].apply(get_heat_color)
 
             import plotly.express as px
+
             fig = px.bar(
                 heat_df,
                 x="逾期天数",
@@ -497,7 +506,7 @@ else:
             )
             # 图表极简适配卡片
             fig.update_layout(
-                margin=dict(l=0,r=0,t=8,b=0),
+                margin=dict(l=0, r=0, t=8, b=0),
                 paper_bgcolor="rgba(0,0,0,0)",
                 plot_bgcolor="rgba(0,0,0,0)",
                 showlegend=False
@@ -507,7 +516,7 @@ else:
             st.plotly_chart(fig, use_container_width=True)
 
             st.markdown("</div>", unsafe_allow_html=True)
-        idx +=1
+        idx += 1
 
 # -------------------------- 厂家汇总 --------------------------
 st.subheader("🏭 各厂家交期统计汇总")
