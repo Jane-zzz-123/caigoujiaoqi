@@ -14,32 +14,40 @@ st.markdown("---")
 @st.cache_data(ttl=3600)
 def load_data():
     try:
-        # ✅ 正确的 raw 链接
         url = "https://github.com/Jane-zzz-123/caigoujiaoqi/raw/main/caigoushuju.xlsx"
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         excel_file = BytesIO(response.content)
 
-        df = pd.read_excel(excel_file, sheet_name="源数据")
-        df_product = pd.read_excel(excel_file, sheet_name="产品分类")
+        # 一次性读取所有sheet
+        all_sheets = pd.read_excel(excel_file, sheet_name=None)
+
+        # 读取两个表
+        df = all_sheets["源数据"]
+        df_product = all_sheets["产品分类"]  # 产品表
+
+        # 清洗主表
         need_cols = [
             "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
-            "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家","预计到货时间修改",
+            "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家",
             "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值"
         ]
         df = df[need_cols]
         df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
-
         df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
         df["实际采购交期"] = pd.to_numeric(df["实际采购交期"], errors="coerce")
         df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
 
-        return df
+        # 🔥 关键：同时返回 主表df + 产品表df_product
+        return df, df_product
+
     except Exception as e:
         st.error(f"数据加载失败：{str(e)}")
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
-df = load_data()
+# 🔥 关键：同时接收两个表
+df, df_product_info = load_data()
+
 if df.empty:
     st.stop()
 
@@ -1054,9 +1062,8 @@ st.info("""
 st.markdown("---")
 st.subheader("💡 各品类采购下单建议")
 
-# ===================== 读取产品分类表（和你共用同一个 excel_file） =====================
-# 统计在售产品数量：按 产品类型（新）分组
-df_on_sale = df_product[df_product["是否在售"] == "是"].copy()
+# ===================== 统计在售产品数量（绝对不报错版） =====================
+df_on_sale = df_product_info[df_product_info["是否在售"] == "是"].copy()
 prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
 
 summary_group = compare_df.groupby("产品分类", sort=False)
@@ -1070,7 +1077,7 @@ for i in range(0, len(cate_list), 3):
     for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
             with st.container(border=True):
-                # 品类 + 在售数量（核心）
+                # 品类标题 + 在售数量
                 prod_num = prod_count_map.get(cate, 0)
                 st.markdown(f"**📦 {cate}（在售产品：{prod_num} 款）**")
 
@@ -1107,11 +1114,11 @@ for i in range(0, len(cate_list), 3):
                             f"准时率：{r['准时率%']}%"
                         )
 
-                # 风险提示（带数量，优先级明确）
+                # 风险提示（带产品数量，优先级清晰）
                 if good_df.empty:
-                    st.info(f"💡 暂无优质供方｜在售 {prod_num} 款需开发")
+                    st.info(f"💡 暂无优质供方｜在售 {prod_num} 款需开发新厂家")
                 if group_data["厂家数"].iloc[0] == 1:
-                    st.warning(f"⚠️ 单一供应风险｜在售 {prod_num} 款仅 1 家")
+                    st.warning(f"⚠️ 单一供应风险｜在售 {prod_num} 款仅 1 家供货")
 
 # ===================== 结束 =====================
 
