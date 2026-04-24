@@ -813,10 +813,10 @@ st.success(f"""
 ✅ 历史履约统计区间：{start_str} ~ {end_str}（已选{len(eval_months)}个月）
 """)
 
-# -------------------------- 以下完全不用改 --------------------------
+# -------------------------- 下方原有全部业务逻辑 100% 保留无需改动 --------------------------
 st.markdown("---")
 
-# 只保留有数据的组合
+# 清洗有效数据
 df_actual = df_actual[
     df_actual["厂家"].notna() &
     df_actual["厂家类目明细"].notna() &
@@ -829,12 +829,12 @@ df_latest = df_latest[
     df_latest["采购交期"].notna()
 ].copy()
 
-# 1）按 厂家+类目 计算【最新月份的采购交期均值】→ 永远是最新月
+# 最新月基准交期均值
 latest_mean = df_latest.groupby(["厂家", "厂家类目明细"]).agg(
     当前采购交期均值=("采购交期", "mean")
 ).reset_index()
 
-# 自定义：业务版分位计算（和你手工累计占比完全一样！）
+# 业务自定义分位算法
 def biz_quantile(series, q):
     s = series.dropna().sort_values().reset_index(drop=True)
     if len(s) == 0:
@@ -843,7 +843,7 @@ def biz_quantile(series, q):
     idx = max(0, min(idx, len(s)-1))
     return s.iloc[idx]
 
-# ----------------- 正确分位计算 -----------------
+# 历史履约分位&准时率计算
 actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
     实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
@@ -854,7 +854,7 @@ actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
 ).reset_index()
 
-# 3）合并两张表 → 最终表
+# 合并数据
 quantile_stats = pd.merge(
     latest_mean,
     actual_stats,
@@ -862,7 +862,7 @@ quantile_stats = pd.merge(
     how="inner"
 )
 
-# 格式处理
+# 数值格式规整
 cols_round = [
     "当前采购交期均值",
     "实际交期80分位", "实际交期85分位",
@@ -872,8 +872,8 @@ for c in cols_round:
     quantile_stats[c] = quantile_stats[c].round(2)
 quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
-# 4）交期建议
-def get_delivery_advice(row, date_range):
+# 交期优化建议逻辑
+def get_delivery_advice(row):
     current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
     q85 = row["实际交期85分位"]
@@ -881,13 +881,7 @@ def get_delivery_advice(row, date_range):
     rate = row["准时率"]
     sample = row["样本订单数"]
 
-    if date_range == "仅选择月份":
-        min_sample = 5
-    elif date_range == "近三个月":
-        min_sample = 5
-    else:
-        min_sample = 5
-
+    min_sample = 5
     if sample < min_sample:
         return "⚠️ 样本数据太少，暂不提出修改建议"
 
@@ -913,15 +907,17 @@ def get_delivery_advice(row, date_range):
             return f"🟡 履约整体稳定，建议上调至{ref_q}天，减少逾期波动"
         else:
             return f"🟡 交期存在压缩空间，可下调至{ref_q}天优化交付"
+
     else:
         if current < ref_q:
             return f"🟠 履约偏弱，建议上调至{ref_q}天，大幅降低逾期风险"
         else:
             return "🟡 当前交期较为宽松，可根据放量需求适度收紧"
 
-quantile_stats["采购交期修改建议"] = quantile_stats.apply(lambda x: get_delivery_advice(x, date_range), axis=1)
 
-# 卡片展示
+quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
+
+# 渲染分析卡片
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
 card_idx = 0
@@ -983,6 +979,7 @@ for _, row in quantile_stats.iterrows():
 """, unsafe_allow_html=True)
     card_idx += 1
 
+# 明细数据表格
 st.markdown("#### 📊 交期分位数分析明细表格")
 st.dataframe(quantile_stats, use_container_width=True, hide_index=True)
 
