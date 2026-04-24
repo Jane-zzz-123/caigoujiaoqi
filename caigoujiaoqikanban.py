@@ -1591,9 +1591,11 @@ st.plotly_chart(fig_vol, use_container_width=True)
 # ========================================================================
 st.subheader("📦 每月真实产能趋势（件）")
 
-# 1. 按月统计真实产能 = 每月到货采购量（真实产能）
-df_monthly_cap = df_filter.groupby(["到货年月_str"], as_index=False).agg(
-    当月产能=("采购量", "sum")  # 这个就是每月真实产出
+# 1. 按月统计真实产能 = 每月【准时到货量】（逾期不算）
+df_on_time = df_filter[df_filter["交期状态"] == "提前/准时"].copy()
+
+df_monthly_cap = df_on_time.groupby(["到货年月_str"], as_index=False).agg(
+    当月产能=("采购量", "sum")  # 真实产能 = 仅准时交付的量
 ).sort_values("到货年月_str")
 
 df_monthly_cap["到货月份_中文"] = pd.to_datetime(
@@ -1615,7 +1617,7 @@ fig_cap.add_trace(go.Scatter(
     text=df_monthly_cap["当月产能"],
     textposition="top center",
     line=dict(width=3, color="#3498db"),
-    name="每月真实产能"
+    name="每月真实产能（准时交付）"
 ))
 
 # 平均产能线（参考基准）
@@ -1640,9 +1642,10 @@ st.plotly_chart(fig_cap, use_container_width=True)
 # 4. 直接告诉你产能范围（你要的结论）
 st.success(f"""
 📊 产能区间总结：
-• 平均月产能：**{avg_cap:.0f} 件**
-• 产能波动范围：**{min_cap:.0f} ~ {max_cap:.0f} 件**
+• 平均月真实产能（准时交付）：**{avg_cap:.0f} 件**
+• 真实产能波动范围：**{min_cap:.0f} ~ {max_cap:.0f} 件**
 """)
+
 # ========================================================================
 # 新增：逐月滑动半年产能&准时率明细表格（和单月面板算法完全统一）
 # ========================================================================
@@ -1658,15 +1661,17 @@ def get_rolling_half_year_data(df, current_month_str):
     window_list = [str(p) for p in window_periods]
 
     # 筛选窗口周期内全部数据
-    df_window = df_filter[df_filter["到货年月_str"].isin(window_list)].copy()
+    df_window = df[df["到货年月_str"].isin(window_list)].copy()
     if df_window.empty:
         return 0, 0, 0
 
-    # 1. 近半年平均产能
-    monthly_total = df_window.groupby("到货年月_str")["采购量"].sum()
+    # ===================== 核心修改 =====================
+    # 1. 近半年平均【真实产能】= 仅准时交付的月度平均值
+    df_ontime_window = df_window[df_window["交期状态"] == "提前/准时"].copy()
+    monthly_total = df_ontime_window.groupby("到货年月_str")["采购量"].sum()
     half_year_avg_cap = monthly_total.mean().round(0)
 
-    # 2. 近半年准时率
+    # 2. 近半年准时率（不变，正确）
     total_order = len(df_window)
     ontime_order = (df_window["交期状态"] == "提前/准时").sum()
     half_year_on_time = (ontime_order / total_order * 100).round(1) if total_order > 0 else 0
@@ -1678,7 +1683,12 @@ table_data = []
 for idx, row in df_volume.iterrows():
     month = row["到货年月_str"]
     month_cn = row["到货月份_中文"]
-    current_cap = row["总采购量"]
+
+    # ===================== 当月真实产能 = 准时到货量 =====================
+    current_cap = df_filter[
+        (df_filter["到货年月_str"] == month) &
+        (df_filter["交期状态"] == "提前/准时")
+    ]["采购量"].sum()
 
     # 调用滑动计算
     avg_6m_cap, rate_6m, _ = get_rolling_half_year_data(df_filter, month)
@@ -1692,7 +1702,7 @@ for idx, row in df_volume.iterrows():
     # 组装表格行
     table_data.append({
         "到货月份": month_cn,
-        "当月真实产能(件)": int(current_cap),
+        "当月真实产能(件)": int(current_cap),  # 已修改为准时
         "滑动近半年平均产能(件)": int(avg_6m_cap),
         "滑动近半年准时率": f"{rate_6m}%",
         "当月安全可放量产能(件)": int(safe_cap),
@@ -1713,9 +1723,9 @@ st.dataframe(
 st.info("""
 💡 计算规则说明：
 1. 滑动窗口：以当月为终点，往前追溯最多6个月，历史不足6个月则取全部已有数据
-2. 安全产能 = 滑动近半年平均产能 × 滑动近半年准时率
-3. 负载利用率 = 当月真实产能 ÷ 当月安全可放量产能
-4. 完全和上方【厂家产能综合分析】单月面板算法保持一致
+2. 真实产能 = 仅统计【准时/提前交付】的到货量，逾期交付不计入产能
+3. 安全产能 = 滑动近半年平均真实产能 × 滑动近半年准时率
+4. 负载利用率 = 当月真实产能 ÷ 当月安全可放量产能
 """)
 
 
