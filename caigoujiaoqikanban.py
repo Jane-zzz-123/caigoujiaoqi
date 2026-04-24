@@ -21,7 +21,7 @@ def load_data():
         excel_file = BytesIO(response.content)
 
         df = pd.read_excel(excel_file, sheet_name="源数据")
-
+        df_product = pd.read_excel(excel_file, sheet_name="产品分类")
         need_cols = [
             "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
             "到货年月", "采购交期", "预计到货时间修改", "异常数据", "厂家","预计到货时间修改",
@@ -1056,7 +1056,6 @@ st.subheader("💡 各品类采购下单建议")
 
 # ===================== 读取产品分类表（和你共用同一个 excel_file） =====================
 # 统计在售产品数量：按 产品类型（新）分组
-df_product = pd.read_excel(excel_file, sheet_name="产品分类")
 df_on_sale = df_product[df_product["是否在售"] == "是"].copy()
 prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
 
