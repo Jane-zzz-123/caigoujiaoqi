@@ -1562,7 +1562,6 @@ fig_vol.update_yaxes(title_text="订单数", secondary_y=False)
 fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
-# ========================================================================
 # 逐月 · 厂家安全产能变化趋势表（跟单月面板列完全一致）
 # ========================================================================
 st.markdown("---")
@@ -1581,7 +1580,7 @@ def get_rolling_by_factory_month(df, factory, current_month_str):
     ].copy()
 
     if df_fp.empty:
-        return [0]*9
+        return 0, 0, 0, 0, 0, 0, 0, 0.0, 0
 
     # 近3个月
     p3 = pd.period_range(current_p-2, current_p, freq='M')
@@ -1610,12 +1609,12 @@ def get_rolling_by_factory_month(df, factory, current_month_str):
     # 准时率
     total = len(df6)
     ontime = (df6["交期状态"] == "提前/准时").sum()
-    rate = (ontime / total * 100).round(1) if total > 0 else 0
+    rate = (ontime / total * 100) if total > 0 else 0.0
 
-    # 安全产能
-    safe = (cap6 * rate / 100).round(0)
+    # 安全产能 ✅ 修复这里
+    safe = round(cap6 * rate / 100, 0)
 
-    return int(ord3), int(cap3), int(ord6), int(cap6), int(ord12), int(cap12), int(max_cap), float(rate), int(safe)
+    return int(ord3), int(cap3), int(ord6), int(cap6), int(ord12), int(cap12), int(max_cap), round(rate,1), int(safe)
 
 # 生成全量明细
 table_data = []
