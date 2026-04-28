@@ -375,6 +375,12 @@ else:
     ).reset_index()
     level_cnt["平均逾期天数"] = level_cnt["平均逾期天数"].round(1)
 
+    # ====================== 核心修改：固定排序 ======================
+    level_order = ["轻度(1-3天)", "中度(4-7天)", "重度(8-15天)", "极度(>15天)"]
+    level_cnt["逾期等级"] = pd.Categorical(level_cnt["逾期等级"], categories=level_order, ordered=True)
+    level_cnt = level_cnt.sort_values("逾期等级")
+    # ================================================================
+
     with col1:
         color_map = {
             "轻度(1-3天)": "#10b981",
