@@ -546,7 +546,7 @@ if not df_current.empty:
          factory_df["PO单数"].replace(0, np.nan).astype(np.float64) * 100)
     ).round(2).fillna(0.0)
     jq_df = df_current.groupby("厂家").agg(
-        平均交期差值=("预计-实际交期的差值", "mean"),
+        平均交期=("实际采购交期", "mean"),
         最短实际交期=("实际采购交期", "min"),
         最长实际交期=("实际采购交期", "max")
     ).round(2).reset_index()
