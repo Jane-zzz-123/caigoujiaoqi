@@ -1563,79 +1563,133 @@ fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
 # ========================================================================
-# 新增：逐月滑动半年产能&准时率明细表格（和单月厂家面板算法完全统一）
+# 逐月 · 厂家安全产能变化趋势表（跟单月面板列完全一致）
 # ========================================================================
 st.markdown("---")
-st.subheader("📋 逐月滑动半年产能明细")
+st.subheader("📋 各厂家逐月安全产能变化明细")
 
-# 定义滑动半年计算函数（和厂家面板逻辑保持一致）
-def get_rolling_half_year_data(df, current_month_str):
+# 按月 + 厂家 滑动计算
+def get_rolling_by_factory_month(df, factory, current_month_str):
     current_p = pd.Period(current_month_str, freq='M')
-    # 滑动窗口：以当月为终点，往前追溯最多6个月（不足6月则取全部）
-    start_p = current_p - 5
-    window_periods = pd.period_range(start_p, current_p, freq='M')
-    window_list = [str(p) for p in window_periods]
+    start_p = current_p - 11
+    window_all = pd.period_range(start_p, current_p, freq='M')
+    window_all_str = [str(p) for p in window_all]
 
-    # 筛选窗口周期内全部数据
-    df_window = df[df["到货年月_str"].isin(window_list)].copy()
-    if df_window.empty:
-        return 0, 0, 0, 0, 0
+    df_fp = df[
+        (df["厂家"] == factory) &
+        (df["到货年月_str"].isin(window_all_str))
+    ].copy()
 
-    # 1. 多口径产能计算（和厂家面板完全一致）
-    monthly_total = df_window.groupby("到货年月_str")["采购量"].sum()
-    avg_3m_cap = monthly_total.tail(3).mean().round(0) if len(monthly_total)>=1 else 0
-    avg_6m_cap = monthly_total.mean().round(0)
-    avg_12m_cap = monthly_total.tail(12).mean().round(0) if len(monthly_total)>=1 else 0
-    max_cap = monthly_total.max() if len(monthly_total)>=1 else 0
+    if df_fp.empty:
+        return [0]*9
 
-    # 2. 近半年准时率（和厂家面板完全一致）
-    total_order = len(df_window)
-    ontime_order = (df_window["交期状态"] == "提前/准时").sum()
-    half_year_on_time = (ontime_order / total_order * 100).round(1) if total_order > 0 else 0
+    # 近3个月
+    p3 = pd.period_range(current_p-2, current_p, freq='M')
+    df3 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p3])]
+    mon3 = df3.groupby("到货年月_str")["采购量"].sum()
+    ord3 = df3["采购单号"].nunique()
 
-    return avg_3m_cap, avg_6m_cap, avg_12m_cap, max_cap, half_year_on_time
+    # 近6个月
+    p6 = pd.period_range(current_p-5, current_p, freq='M')
+    df6 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p6])]
+    mon6 = df6.groupby("到货年月_str")["采购量"].sum()
+    ord6 = df6["采购单号"].nunique()
 
-# 逐月计算所有指标
+    # 近12个月
+    p12 = pd.period_range(current_p-11, current_p, freq='M')
+    df12 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p12])]
+    mon12 = df12.groupby("到货年月_str")["采购量"].sum()
+    ord12 = df12["采购单号"].nunique()
+
+    # 产能
+    cap3 = mon3.mean().round(0) if not mon3.empty else 0
+    cap6 = mon6.mean().round(0) if not mon6.empty else 0
+    cap12 = mon12.mean().round(0) if not mon12.empty else 0
+    max_cap = mon6.max().round(0) if not mon6.empty else 0
+
+    # 准时率
+    total = len(df6)
+    ontime = (df6["交期状态"] == "提前/准时").sum()
+    rate = (ontime / total * 100).round(1) if total > 0 else 0
+
+    # 安全产能
+    safe = (cap6 * rate / 100).round(0)
+
+    return int(ord3), int(cap3), int(ord6), int(cap6), int(ord12), int(cap12), int(max_cap), float(rate), int(safe)
+
+# 生成全量明细
 table_data = []
-for idx, row in df_volume.iterrows():
-    month = row["到货年月_str"]
-    month_cn = row["到货月份_中文"]
+factories = df_filter["厂家"].unique()
+months = sorted(df_filter["到货年月_str"].unique(), reverse=True)
 
-    # 调用滑动计算
-    avg_3m_cap, avg_6m_cap, avg_12m_cap, max_cap, rate_6m = get_rolling_half_year_data(df_filter, month)
+for fac in factories:
+    for mth in months:
+        ord3, cap3, ord6, cap6, ord12, cap12, max_cap, rate, safe = get_rolling_by_factory_month(df_filter, fac, mth)
+        table_data.append({
+            "厂家": fac,
+            "到货年月": mth,
+            "近3个月订单数": ord3,
+            "近3个月平均产能": cap3,
+            "近半年订单数": ord6,
+            "近半年平均产能（基准）": cap6,
+            "近一年订单数": ord12,
+            "近一年平均产能": cap12,
+            "历史最高单月产能": max_cap,
+            "近半年准时率%": rate,
+            "安全可放量产能": safe
+        })
 
-    # 统一标准公式计算（和厂家面板完全一致）
-    safe_cap = (avg_6m_cap * rate_6m / 100).round(0)
+df_trend = pd.DataFrame(table_data)
 
-    # 组装表格行（和厂家面板列完全对应，仅维度改为月份）
-    table_data.append({
-        "到货月份": month_cn,
-        "近3个月平均产能": int(avg_3m_cap),
-        "近半年平均产能（基准）": int(avg_6m_cap),
-        "近一年平均产能": int(avg_12m_cap),
-        "历史最高单月产能": int(max_cap),
-        "近半年准时率%": f"{rate_6m}%",
-        "安全可放量产能": int(safe_cap),
-    })
-
-# 转为DataFrame展示
-df_table = pd.DataFrame(table_data)
+# 展示表格（跟单月面板列完全一致）
+show_cols = [
+    "厂家", "到货年月",
+    "近3个月订单数", "近3个月平均产能",
+    "近半年订单数", "近半年平均产能（基准）",
+    "近一年订单数", "近一年平均产能",
+    "历史最高单月产能", "近半年准时率%", "安全可放量产能"
+]
 
 st.dataframe(
-    df_table,
+    df_trend[show_cols].style.format({
+        "近3个月订单数": "{:,.0f}",
+        "近3个月平均产能": "{:,.0f}",
+        "近半年订单数": "{:,.0f}",
+        "近半年平均产能（基准）": "{:,.0f}",
+        "近一年订单数": "{:,.0f}",
+        "近一年平均产能": "{:,.0f}",
+        "历史最高单月产能": "{:,.0f}",
+        "近半年准时率%": "{:.1f}%",
+        "安全可放量产能": "{:,.0f}"
+    }),
     use_container_width=True,
     hide_index=True,
     height=500
 )
 
-# 补充提示说明（和厂家面板保持一致）
-st.info("""
-💡 计算规则说明：
-1. 滑动窗口：以当月为终点，往前追溯最多6个月（不足6月则取全部已有数据）
-2. 各周期平均产能：对应时间窗口内，每月总到货量的平均值
-3. 近半年准时率：过去6个月整体准时率
-4. 安全可放量产能 = 近半年平均产能 × 近半年准时率（月度分单参考上限）
-""")
+# -------------------------- 厂家安全量变化卡片 --------------------------
+st.markdown("---")
+st.subheader("🏭 各厂家安全产能月度变化")
+
+# 按厂家分组展示趋势卡片
+for fac in factories:
+    df_fac = df_trend[df_trend["厂家"] == fac].sort_values("到货年月")
+    if df_fac["安全可放量产能"].sum() == 0:
+        continue
+
+    latest = df_fac.iloc[-1]
+    prev_val = df_fac.iloc[-2]["安全可放量产能"] if len(df_fac)>=2 else 0
+    latest_val = latest["安全可放量产能"]
+    change = latest_val - prev_val
+    arrow = "⬆️" if change > 0 else "⬇️" if change < 0 else "➡️"
+
+    st.markdown(f"""
+    <div style="padding:14px; border-radius:10px; background:#f8f9fa; margin-bottom:10px;">
+        <b>{fac}</b><br>
+        最新安全可放量产能：{latest_val:,.0f} 件 &nbsp;&nbsp; {arrow} 环比变化：{change:+.0f} 件<br>
+        近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;&nbsp; 近半年订单数：{latest['近半年订单数']} 单
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ========================================================================
