@@ -1131,10 +1131,11 @@ for i in range(0, len(cate_list), 3):
 # ====================== 科学优化版：近半年平均产能为基准 ======================
 # -------------------------- 厂家产能&准时率综合分析（月度复盘版） --------------------------
 # -------------------------- 厂家产能&准时率综合分析（月度复盘版） --------------------------
+# -------------------------- 厂家产能&准时率综合分析（月度复盘版） --------------------------
 st.markdown("---")
 st.header("🏭 厂家产能&准时率综合分析")
 
-# 安全产能说明文字（新增，清晰易懂）
+# 安全产能说明文字
 st.markdown("""
 <div style="font-size:15px; background-color:#f8f9fa; padding:12px 16px; border-radius:10px; line-height:1.6;">
 <b>📌 安全可放量产能 · 计算说明</b><br>
@@ -1146,40 +1147,55 @@ st.markdown("""
 df_final = df.copy()
 
 # 时间格式化
-df_final["下单年月"] = pd.to_datetime(df_final["下单时间"]).dt.to_period("M")
 df_final["到货年月"] = pd.to_datetime(df_final["到货年月"]).dt.to_period("M")
 
-# 选择评估月份
+# 选择统计截止月份
 order_months = sorted(df_final["到货年月"].unique(), reverse=True)
 selected_month = st.selectbox("选择统计截止月份", order_months)
 
 # 周期区间（以所选月份为终点倒推）
 end_month = selected_month
 end_p = pd.Period(end_month, freq='M')
-p3  = pd.period_range(end_p - 2, end_p, freq='M')
-p6  = pd.period_range(end_p - 5, end_p, freq='M')
+p3 = pd.period_range(end_p - 2, end_p, freq='M')
+p6 = pd.period_range(end_p - 5, end_p, freq='M')
 p12 = pd.period_range(end_p - 11, end_p, freq='M')
 
-# 按到货年月计算历史产能（用于基准）
-def get_cap(df, period):
+
+# 按到货年月计算产能和订单数
+def get_cap_and_order_cnt(df, period):
     dfp = df[df["到货年月"].isin(period)]
     if dfp.empty:
-        return pd.Series(dtype=float), pd.Series(dtype=float)
-    monthly = dfp.groupby(["厂家", "到货年月"])["采购量"].sum()
-    avg_cap = monthly.groupby(level=0).mean().round(0)
-    max_cap = monthly.groupby(level=0).max()
-    return avg_cap, max_cap
+        return pd.Series(dtype=float), pd.Series(dtype=float), pd.Series(dtype=float)
 
-# 多口径产能
-cap_3m, _        = get_cap(df_final, p3)
-cap_6m, cap_max  = get_cap(df_final, p6)
-cap_12m, _       = get_cap(df_final, p12)
+    # 按厂家+月份聚合
+    monthly = dfp.groupby(["厂家", "到货年月"]).agg(
+        采购量=("采购量", "sum"),
+        订单数=("采购单号", "nunique")
+    )
+
+    avg_cap = monthly["采购量"].groupby(level=0).mean().round(0)
+    max_cap = monthly["采购量"].groupby(level=0).max()
+    total_orders = monthly["订单数"].groupby(level=0).sum()
+
+    return avg_cap, max_cap, total_orders
+
+
+# 多口径产能&订单数
+cap_3m, _, orders_3m = get_cap_and_order_cnt(df_final, p3)
+cap_6m, cap_max, orders_6m = get_cap_and_order_cnt(df_final, p6)
+cap_12m, _, orders_12m = get_cap_and_order_cnt(df_final, p12)
 
 # 重命名列
-cap_3m    = cap_3m.rename("近3个月平均产能")
-cap_6m    = cap_6m.rename("近半年平均产能（基准）")
-cap_12m   = cap_12m.rename("近一年平均产能")
-cap_max   = cap_max.rename("历史最高单月产能")
+cap_3m = cap_3m.rename("近3个月平均产能")
+orders_3m = orders_3m.rename("近3个月订单数")
+
+cap_6m = cap_6m.rename("近半年平均产能（基准）")
+orders_6m = orders_6m.rename("近半年订单数")
+
+cap_12m = cap_12m.rename("近一年平均产能")
+orders_12m = orders_12m.rename("近一年订单数")
+
+cap_max = cap_max.rename("历史最高单月产能")
 
 # 近半年准时率
 df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
@@ -1192,18 +1208,24 @@ else:
 
 # 合并所有数据
 result = pd.concat([
-    cap_3m, cap_6m, cap_12m, cap_max,
+    cap_3m, orders_3m,
+    cap_6m, orders_6m,
+    cap_12m, orders_12m,
+    cap_max,
     on_time_rate
 ], axis=1).fillna(0).reset_index()
 
-# 安全可放量产能（保留！）
+# 安全可放量产能
 result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
 
-# 展示列（精简版，只留月度复盘有用字段）
+# 展示列（按你习惯的顺序，新增了订单数）
 show_cols = [
     "厂家",
+    "近3个月订单数",
     "近3个月平均产能",
+    "近半年订单数",
     "近半年平均产能（基准）",
+    "近一年订单数",
     "近一年平均产能",
     "历史最高单月产能",
     "近半年准时率%",
@@ -1215,8 +1237,11 @@ show_cols = [c for c in show_cols if c in result.columns]
 
 st.dataframe(
     result[show_cols].style.format({
+        "近3个月订单数": "{:,.0f}",
         "近3个月平均产能": "{:,.0f}",
+        "近半年订单数": "{:,.0f}",
         "近半年平均产能（基准）": "{:,.0f}",
+        "近一年订单数": "{:,.0f}",
         "近一年平均产能": "{:,.0f}",
         "历史最高单月产能": "{:,.0f}",
         "近半年准时率%": "{:.1f}%",
