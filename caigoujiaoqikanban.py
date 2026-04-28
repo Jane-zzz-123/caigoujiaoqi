@@ -1545,7 +1545,7 @@ st.plotly_chart(fig_delay, use_container_width=True)
 # ========================================================================
 # 3. 订单量 + 采购量趋势（合作深度）
 # ========================================================================
-st.subheader("📦 订单量 & 采购量趋势（合作深度）")
+st.subheader("📦 订单量 & 采购量趋势")
 df_volume = df_filter.groupby("到货年月_str").agg(
     总订单数=("采购单号", "count"),
     总采购量=("采购量", "sum")
@@ -1563,76 +1563,15 @@ fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
 # ========================================================================
-# 🌟 每月真实产能趋势（你想要的：每个月产能多少、区间多少）
-# 不再算百分比！只看真实产能！
-# ========================================================================
-st.subheader("📦 每月真实产能趋势（件）")
-
-# 1. 按月统计真实产能 = 每月【准时到货量】（逾期不算）
-df_on_time = df_filter[df_filter["交期状态"] == "提前/准时"].copy()
-
-df_monthly_cap = df_on_time.groupby(["到货年月_str"], as_index=False).agg(
-    当月产能=("采购量", "sum")  # 真实产能 = 仅准时交付的量
-).sort_values("到货年月_str")
-
-df_monthly_cap["到货月份_中文"] = pd.to_datetime(
-    df_monthly_cap["到货年月_str"]
-).dt.strftime("%Y年%m月")
-
-# 2. 计算产能波动区间（用来判断稳定度）
-min_cap = df_monthly_cap["当月产能"].min()
-max_cap = df_monthly_cap["当月产能"].max()
-avg_cap = df_monthly_cap["当月产能"].mean()
-
-# 3. 画真实产能折线图
-fig_cap = go.Figure()
-
-fig_cap.add_trace(go.Scatter(
-    x=df_monthly_cap["到货月份_中文"],
-    y=df_monthly_cap["当月产能"],
-    mode="lines+markers+text",
-    text=df_monthly_cap["当月产能"],
-    textposition="top center",
-    line=dict(width=3, color="#3498db"),
-    name="每月真实产能（准时交付）"
-))
-
-# 平均产能线（参考基准）
-fig_cap.add_trace(go.Scatter(
-    x=df_monthly_cap["到货月份_中文"],
-    y=[avg_cap] * len(df_monthly_cap),
-    mode="lines",
-    line=dict(color="#2ecc71", dash="dash"),
-    name=f"平均产能 {avg_cap:.0f} 件"
-))
-
-fig_cap.update_layout(
-    height=400,
-    title=f"{selected_supplier} | 每月真实产能（件）",
-    xaxis_title="月份",
-    yaxis_title="产能（件）",
-    template="plotly_white"
-)
-
-st.plotly_chart(fig_cap, use_container_width=True)
-
-# 4. 直接告诉你产能范围（你要的结论）
-st.success(f"""
-📊 产能区间总结：
-• 平均月真实产能（准时交付）：**{avg_cap:.0f} 件**
-• 真实产能波动范围：**{min_cap:.0f} ~ {max_cap:.0f} 件**
-""")
-
-# ========================================================================
-# 新增：逐月滑动半年产能&准时率明细表格（和单月面板算法完全统一）
+# 新增：逐月滑动半年产能&准时率明细表格（和单月厂家面板算法完全统一）
 # ========================================================================
 st.markdown("---")
 st.subheader("📋 逐月滑动半年产能明细")
 
-# 定义滑动半年计算函数
+# 定义滑动半年计算函数（和厂家面板逻辑保持一致）
 def get_rolling_half_year_data(df, current_month_str):
     current_p = pd.Period(current_month_str, freq='M')
-    # 滑动窗口：截止当月，往前追溯最多6个月（不足6月则取全部）
+    # 滑动窗口：以当月为终点，往前追溯最多6个月（不足6月则取全部）
     start_p = current_p - 5
     window_periods = pd.period_range(start_p, current_p, freq='M')
     window_list = [str(p) for p in window_periods]
@@ -1640,20 +1579,21 @@ def get_rolling_half_year_data(df, current_month_str):
     # 筛选窗口周期内全部数据
     df_window = df[df["到货年月_str"].isin(window_list)].copy()
     if df_window.empty:
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0
 
-    # ===================== 核心修改 =====================
-    # 1. 近半年平均【真实产能】= 仅准时交付的月度平均值
-    df_ontime_window = df_window[df_window["交期状态"] == "提前/准时"].copy()
-    monthly_total = df_ontime_window.groupby("到货年月_str")["采购量"].sum()
-    half_year_avg_cap = monthly_total.mean().round(0)
+    # 1. 多口径产能计算（和厂家面板完全一致）
+    monthly_total = df_window.groupby("到货年月_str")["采购量"].sum()
+    avg_3m_cap = monthly_total.tail(3).mean().round(0) if len(monthly_total)>=1 else 0
+    avg_6m_cap = monthly_total.mean().round(0)
+    avg_12m_cap = monthly_total.tail(12).mean().round(0) if len(monthly_total)>=1 else 0
+    max_cap = monthly_total.max() if len(monthly_total)>=1 else 0
 
-    # 2. 近半年准时率（不变，正确）
+    # 2. 近半年准时率（和厂家面板完全一致）
     total_order = len(df_window)
     ontime_order = (df_window["交期状态"] == "提前/准时").sum()
     half_year_on_time = (ontime_order / total_order * 100).round(1) if total_order > 0 else 0
 
-    return half_year_avg_cap, half_year_on_time, total_order
+    return avg_3m_cap, avg_6m_cap, avg_12m_cap, max_cap, half_year_on_time
 
 # 逐月计算所有指标
 table_data = []
@@ -1661,29 +1601,21 @@ for idx, row in df_volume.iterrows():
     month = row["到货年月_str"]
     month_cn = row["到货月份_中文"]
 
-    # ===================== 当月真实产能 = 准时到货量 =====================
-    current_cap = df_filter[
-        (df_filter["到货年月_str"] == month) &
-        (df_filter["交期状态"] == "提前/准时")
-    ]["采购量"].sum()
-
     # 调用滑动计算
-    avg_6m_cap, rate_6m, _ = get_rolling_half_year_data(df_filter, month)
+    avg_3m_cap, avg_6m_cap, avg_12m_cap, max_cap, rate_6m = get_rolling_half_year_data(df_filter, month)
 
-    # 统一标准公式计算
+    # 统一标准公式计算（和厂家面板完全一致）
     safe_cap = (avg_6m_cap * rate_6m / 100).round(0)
-    load_rate = 0.0
-    if safe_cap > 0:
-        load_rate = (current_cap / safe_cap * 100).round(1)
 
-    # 组装表格行
+    # 组装表格行（和厂家面板列完全对应，仅维度改为月份）
     table_data.append({
         "到货月份": month_cn,
-        "当月真实产能(件)": int(current_cap),  # 已修改为准时
-        "滑动近半年平均产能(件)": int(avg_6m_cap),
-        "滑动近半年准时率": f"{rate_6m}%",
-        "当月安全可放量产能(件)": int(safe_cap),
-        "当月产能负载利用率": f"{load_rate}%"
+        "近3个月平均产能": int(avg_3m_cap),
+        "近半年平均产能（基准）": int(avg_6m_cap),
+        "近一年平均产能": int(avg_12m_cap),
+        "历史最高单月产能": int(max_cap),
+        "近半年准时率%": f"{rate_6m}%",
+        "安全可放量产能": int(safe_cap),
     })
 
 # 转为DataFrame展示
@@ -1696,13 +1628,13 @@ st.dataframe(
     height=500
 )
 
-# 补充提示说明
+# 补充提示说明（和厂家面板保持一致）
 st.info("""
 💡 计算规则说明：
-1. 滑动窗口：以当月为终点，往前追溯最多6个月，历史不足6个月则取全部已有数据
-2. 真实产能 = 仅统计【准时/提前交付】的到货量，逾期交付不计入产能
-3. 安全产能 = 滑动近半年平均真实产能 × 滑动近半年准时率
-4. 负载利用率 = 当月真实产能 ÷ 当月安全可放量产能
+1. 滑动窗口：以当月为终点，往前追溯最多6个月（不足6月则取全部已有数据）
+2. 各周期平均产能：对应时间窗口内，每月总到货量的平均值
+3. 近半年准时率：过去6个月整体准时率
+4. 安全可放量产能 = 近半年平均产能 × 近半年准时率（月度分单参考上限）
 """)
 
 
