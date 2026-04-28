@@ -1667,28 +1667,68 @@ st.dataframe(
 )
 
 # -------------------------- 厂家安全量变化卡片 --------------------------
+# -------------------------- 厂家安全量变化卡片（优化版：一行三列+分类+迷你折线图） --------------------------
 st.markdown("---")
 st.subheader("🏭 各厂家安全产能月度变化")
 
-# 按厂家分组展示趋势卡片
-for fac in factories:
+# 定义变化情况分类
+def get_change_status(change):
+    if change > 0:
+        return "上涨", "⬆️", "#10b981"  # 绿色
+    elif change < 0:
+        return "下跌", "⬇️", "#ef4444"  # 红色
+    else:
+        return "持平", "➡️", "#6b7280"  # 灰色
+
+# 按厂家分组展示趋势卡片，一行三列
+factories = df_trend["厂家"].unique()
+cols = st.columns(3)
+
+for i, fac in enumerate(factories):
     df_fac = df_trend[df_trend["厂家"] == fac].sort_values("到货年月")
     if df_fac["安全可放量产能"].sum() == 0:
         continue
 
-    latest = df_fac.iloc[-1]
-    prev_val = df_fac.iloc[-2]["安全可放量产能"] if len(df_fac)>=2 else 0
-    latest_val = latest["安全可放量产能"]
-    change = latest_val - prev_val
-    arrow = "⬆️" if change > 0 else "⬇️" if change < 0 else "➡️"
+    with cols[i % 3]:
+        # 计算变化
+        latest = df_fac.iloc[-1]
+        prev_val = df_fac.iloc[-2]["安全可放量产能"] if len(df_fac)>=2 else latest["安全可放量产能"]
+        latest_val = latest["安全可放量产能"]
+        change = latest_val - prev_val
+        status, arrow, color = get_change_status(change)
 
-    st.markdown(f"""
-    <div style="padding:14px; border-radius:10px; background:#f8f9fa; margin-bottom:10px;">
-        <b>{fac}</b><br>
-        最新安全可放量产能：{latest_val:,.0f} 件 &nbsp;&nbsp; {arrow} 环比变化：{change:+.0f} 件<br>
-        近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;&nbsp; 近半年订单数：{latest['近半年订单数']} 单
-    </div>
-    """, unsafe_allow_html=True)
+        # 卡片主体
+        st.markdown(f"""
+        <div style="padding:12px; border-radius:10px; background:#f8f9fa; margin-bottom:8px;">
+            <b style="font-size:16px;">{fac}</b><br>
+            最新安全可放量产能：<b>{latest_val:,.0f} 件</b><br>
+            <span style="color:{color};">{arrow} 环比变化：{change:+.0f} 件（{status}）</span><br>
+            <small>近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;|&nbsp; 近半年订单数：{latest['近半年订单数']} 单</small>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 迷你折线图
+        df_line = df_fac[["到货年月", "安全可放量产能"]].copy()
+        df_line["到货年月"] = df_line["到货年月"].astype(str)
+
+        fig = px.line(
+            df_line,
+            x="到货年月",
+            y="安全可放量产能",
+            color_discrete_sequence=["#3b82f6"],
+            markers=True,
+            height=120
+        )
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=0, b=0),
+            xaxis_title=None,
+            yaxis_title=None,
+            xaxis=dict(showticklabels=False),
+            yaxis=dict(showticklabels=False),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
+        st.plotly_chart(fig, use_container_width=True)
 
 
 # ========================================================================
