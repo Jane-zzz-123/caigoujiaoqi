@@ -1576,7 +1576,7 @@ def get_monthly_by_factory_month(df, factory, current_month_str):
     ].copy()
 
     if df_fp.empty:
-        return 0, 0, 0, 0.0, 0
+        return 0, 0, 0.0, 0
 
     # ====================== 单月口径（和单月面板100%一致） ======================
     # 当月产能
