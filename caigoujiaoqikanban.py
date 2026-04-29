@@ -1669,18 +1669,54 @@ st.dataframe(
 # -------------------------- 厂家安全量变化卡片 --------------------------
 # -------------------------- 厂家安全量变化卡片（优化版：一行三列+分类+迷你折线图） --------------------------
 st.markdown("---")
-st.subheader("🏭 各厂家安全产能月度变化")
+st.subheader("🏭 各厂家安全产能月度变化（趋势+稳定性）")
 
-# 定义变化情况分类
-def get_change_status(change):
-    if change > 0:
-        return "上涨", "⬆️", "#10b981"  # 绿色
-    elif change < 0:
-        return "下跌", "⬇️", "#ef4444"  # 红色
+
+# ====================== 新版：趋势 + 波动标签 ======================
+def get_trend_label(df_fac):
+    """
+    传入 单个厂家的月度数据（已按时间排序）
+    返回：趋势标签、图标、颜色、说明
+    """
+    values = df_fac["安全可放量产能"].values
+    n = len(values)
+
+    if n < 2:
+        return "数据不足", "📊", "#6b7280", "数据量不足"
+
+    # 1. 计算波动系数（标准差/均值）→ 看稳定性
+    mean_val = values.mean()
+    std_val = values.std()
+    cv = std_val / mean_val if mean_val != 0 else 999
+
+    # 2. 近3个月趋势
+    recent = values[-3:]
+    recent_trend = "up" if (recent[-1] >= recent[-2] >= recent[0]) else \
+        "down" if (recent[-1] <= recent[-2] <= recent[0]) else "flat"
+
+    # ====================== 判定规则 ======================
+    # 持续下滑（高危）
+    if recent_trend == "down" and cv < 0.4:
+        return "持续下滑", "📉", "#ef4444", f"近3个月连续下降 | 波动{cv:.1%}"
+
+    # 持续上升
+    elif recent_trend == "up" and cv < 0.4:
+        return "持续上升", "📈", "#10b981", f"近3个月连续上升 | 波动{cv:.1%}"
+
+    # 大幅波动（风险）
+    elif cv > 0.3:
+        return "大幅波动", "⚠️", "#f59e0b", f"波动过大 | 系数{cv:.1%}"
+
+    # 稳定
+    elif cv < 0.15:
+        return "稳定型", "✅", "#16a34a", f"供货稳定 | 波动{cv:.1%}"
+
+    # 小幅波动
     else:
-        return "持平", "➡️", "#6b7280"  # 灰色
+        return "小幅波动", "📊", "#3b82f6", f"正常波动 | 系数{cv:.1%}"
 
-# 按厂家分组展示趋势卡片，一行三列
+
+# ====================== 按厂家分组展示卡片 ======================
 factories = df_trend["厂家"].unique()
 cols = st.columns(3)
 
@@ -1690,24 +1726,24 @@ for i, fac in enumerate(factories):
         continue
 
     with cols[i % 3]:
-        # 计算变化
         latest = df_fac.iloc[-1]
-        prev_val = df_fac.iloc[-2]["安全可放量产能"] if len(df_fac)>=2 else latest["安全可放量产能"]
         latest_val = latest["安全可放量产能"]
-        change = latest_val - prev_val
-        status, arrow, color = get_change_status(change)
 
-        # 卡片主体
+        # 新版：获取趋势标签（核心替换点）
+        label, icon, color, desc = get_trend_label(df_fac)
+
+        # 卡片主体（保留你原有样式）
         st.markdown(f"""
         <div style="padding:12px; border-radius:10px; background:#f8f9fa; margin-bottom:8px;">
             <b style="font-size:16px;">{fac}</b><br>
             最新安全可放量产能：<b>{latest_val:,.0f} 件</b><br>
-            <span style="color:{color};">{arrow} 环比变化：{change:+.0f} 件（{status}）</span><br>
+            <span style="color:{color}; font-weight:bold;">{icon} {label}</span><br>
+            <small>{desc}</small><br>
             <small>近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;|&nbsp; 近半年订单数：{latest['近半年订单数']} 单</small>
         </div>
         """, unsafe_allow_html=True)
 
-        # 迷你折线图
+        # 迷你折线图（完全保留）
         df_line = df_fac[["到货年月", "安全可放量产能"]].copy()
         df_line["到货年月"] = df_line["到货年月"].astype(str)
 
