@@ -1562,59 +1562,38 @@ fig_vol.update_yaxes(title_text="订单数", secondary_y=False)
 fig_vol.update_yaxes(title_text="采购量", secondary_y=True)
 st.plotly_chart(fig_vol, use_container_width=True)
 
-# 逐月 · 厂家安全产能变化趋势表（跟单月面板列完全一致）
+# 逐月 · 厂家安全产能变化趋势表（跟单月面板完全一致）
 # ========================================================================
 st.markdown("---")
 st.subheader("📋 各厂家逐月安全产能变化明细")
 
-# 按月 + 厂家 滑动计算
-def get_rolling_by_factory_month(df, factory, current_month_str):
-    current_p = pd.Period(current_month_str, freq='M')
-    start_p = current_p - 11
-    window_all = pd.period_range(start_p, current_p, freq='M')
-    window_all_str = [str(p) for p in window_all]
-
+# 按月 + 厂家 计算（跟单月面板逻辑完全一样：当月产能 × 当月准时率）
+def get_monthly_by_factory_month(df, factory, current_month_str):
+    # 只取【当前月份】的数据，不再取过去6个月
     df_fp = df[
         (df["厂家"] == factory) &
-        (df["到货年月_str"].isin(window_all_str))
+        (df["到货年月_str"] == current_month_str)
     ].copy()
 
     if df_fp.empty:
-        return 0, 0, 0, 0, 0, 0, 0, 0.0, 0
+        return 0, 0, 0, 0.0, 0
 
-    # 近3个月
-    p3 = pd.period_range(current_p-2, current_p, freq='M')
-    df3 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p3])]
-    mon3 = df3.groupby("到货年月_str")["采购量"].sum()
-    ord3 = df3["采购单号"].nunique()
+    # ====================== 单月口径（和单月面板100%一致） ======================
+    # 当月产能
+    mon_cap = df_fp["采购量"].sum()
 
-    # 近6个月
-    p6 = pd.period_range(current_p-5, current_p, freq='M')
-    df6 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p6])]
-    mon6 = df6.groupby("到货年月_str")["采购量"].sum()
-    ord6 = df6["采购单号"].nunique()
+    # 当月订单数
+    ord_cnt = df_fp["采购单号"].nunique()
 
-    # 近12个月
-    p12 = pd.period_range(current_p-11, current_p, freq='M')
-    df12 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p12])]
-    mon12 = df12.groupby("到货年月_str")["采购量"].sum()
-    ord12 = df12["采购单号"].nunique()
-
-    # 产能
-    cap3 = mon3.mean().round(0) if not mon3.empty else 0
-    cap6 = mon6.mean().round(0) if not mon6.empty else 0
-    cap12 = mon12.mean().round(0) if not mon12.empty else 0
-    max_cap = mon6.max().round(0) if not mon6.empty else 0
-
-    # 准时率
-    total = len(df6)
-    ontime = (df6["交期状态"] == "提前/准时").sum()
+    # 当月准时率
+    total = len(df_fp)
+    ontime = (df_fp["交期状态"] == "提前/准时").sum()
     rate = (ontime / total * 100) if total > 0 else 0.0
 
-    # 安全产能 ✅ 修复这里
-    safe = round(cap6 * rate / 100, 0)
+    # ✅ 安全产能 = 当月产能 × 当月准时率（跟单月面板完全一样）
+    safe = round(mon_cap * rate / 100, 0)
 
-    return int(ord3), int(cap3), int(ord6), int(cap6), int(ord12), int(cap12), int(max_cap), round(rate,1), int(safe)
+    return int(ord_cnt), int(mon_cap), round(rate, 1), int(safe)
 
 # 生成全量明细
 table_data = []
@@ -1623,42 +1602,30 @@ months = sorted(df_filter["到货年月_str"].unique(), reverse=True)
 
 for fac in factories:
     for mth in months:
-        ord3, cap3, ord6, cap6, ord12, cap12, max_cap, rate, safe = get_rolling_by_factory_month(df_filter, fac, mth)
+        ord_cnt, mon_cap, rate, safe = get_monthly_by_factory_month(df_filter, fac, mth)
         table_data.append({
             "厂家": fac,
             "到货年月": mth,
-            "近3个月订单数": ord3,
-            "近3个月平均产能": cap3,
-            "近半年订单数": ord6,
-            "近半年平均产能（基准）": cap6,
-            "近一年订单数": ord12,
-            "近一年平均产能": cap12,
-            "历史最高单月产能": max_cap,
-            "近半年准时率%": rate,
+            "当月订单数": ord_cnt,
+            "当月平均产能（基准）": mon_cap,
+            "当月准时率%": rate,
             "安全可放量产能": safe
         })
 
 df_trend = pd.DataFrame(table_data)
 
-# 展示表格（跟单月面板列完全一致）
+# 展示表格
 show_cols = [
     "厂家", "到货年月",
-    "近3个月订单数", "近3个月平均产能",
-    "近半年订单数", "近半年平均产能（基准）",
-    "近一年订单数", "近一年平均产能",
-    "历史最高单月产能", "近半年准时率%", "安全可放量产能"
+    "当月订单数", "当月平均产能（基准）",
+    "当月准时率%", "安全可放量产能"
 ]
 
 st.dataframe(
     df_trend[show_cols].style.format({
-        "近3个月订单数": "{:,.0f}",
-        "近3个月平均产能": "{:,.0f}",
-        "近半年订单数": "{:,.0f}",
-        "近半年平均产能（基准）": "{:,.0f}",
-        "近一年订单数": "{:,.0f}",
-        "近一年平均产能": "{:,.0f}",
-        "历史最高单月产能": "{:,.0f}",
-        "近半年准时率%": "{:.1f}%",
+        "当月订单数": "{:,.0f}",
+        "当月平均产能（基准）": "{:,.0f}",
+        "当月准时率%": "{:.1f}%",
         "安全可放量产能": "{:,.0f}"
     }),
     use_container_width=True,
@@ -1667,56 +1634,44 @@ st.dataframe(
 )
 
 # -------------------------- 厂家安全量变化卡片 --------------------------
-# -------------------------- 厂家安全量变化卡片（优化版：一行三列+分类+迷你折线图） --------------------------
 st.markdown("---")
 st.subheader("🏭 各厂家安全产能月度变化（趋势+稳定性）")
 
-
-# ====================== 新版：趋势 + 波动标签 ======================
+# ====================== 趋势判断函数（不变） ======================
 def get_trend_label(df_fac):
-    """
-    传入 单个厂家的月度数据（已按时间排序）
-    返回：趋势标签、图标、颜色、说明
-    """
     values = df_fac["安全可放量产能"].values
     n = len(values)
 
     if n < 2:
         return "数据不足", "📊", "#6b7280", "数据量不足"
 
-    # 1. 计算波动系数（标准差/均值）→ 看稳定性
     mean_val = values.mean()
     std_val = values.std()
     cv = std_val / mean_val if mean_val != 0 else 999
 
-    # 2. 近3个月趋势
     recent = values[-3:]
-    recent_trend = "up" if (recent[-1] >= recent[-2] >= recent[0]) else \
-        "down" if (recent[-1] <= recent[-2] <= recent[0]) else "flat"
+    if len(recent) >= 3:
+        if recent[-1] <= recent[-2] <= recent[0]:
+            recent_trend = "down"
+        elif recent[-1] >= recent[-2] >= recent[0]:
+            recent_trend = "up"
+        else:
+            recent_trend = "flat"
+    else:
+        recent_trend = "flat"
 
-    # ====================== 判定规则 ======================
-    # 持续下滑（高危）
     if recent_trend == "down" and cv < 0.4:
         return "持续下滑", "📉", "#ef4444", f"近3个月连续下降 | 波动{cv:.1%}"
-
-    # 持续上升
     elif recent_trend == "up" and cv < 0.4:
         return "持续上升", "📈", "#10b981", f"近3个月连续上升 | 波动{cv:.1%}"
-
-    # 大幅波动（风险）
     elif cv > 0.3:
         return "大幅波动", "⚠️", "#f59e0b", f"波动过大 | 系数{cv:.1%}"
-
-    # 稳定
     elif cv < 0.15:
         return "稳定型", "✅", "#16a34a", f"供货稳定 | 波动{cv:.1%}"
-
-    # 小幅波动
     else:
         return "小幅波动", "📊", "#3b82f6", f"正常波动 | 系数{cv:.1%}"
 
-
-# ====================== 按厂家分组展示卡片 ======================
+# ====================== 卡片展示（不变） ======================
 factories = df_trend["厂家"].unique()
 cols = st.columns(3)
 
@@ -1728,42 +1683,27 @@ for i, fac in enumerate(factories):
     with cols[i % 3]:
         latest = df_fac.iloc[-1]
         latest_val = latest["安全可放量产能"]
-
-        # 新版：获取趋势标签（核心替换点）
         label, icon, color, desc = get_trend_label(df_fac)
 
-        # 卡片主体（保留你原有样式）
         st.markdown(f"""
         <div style="padding:12px; border-radius:10px; background:#f8f9fa; margin-bottom:8px;">
             <b style="font-size:16px;">{fac}</b><br>
             最新安全可放量产能：<b>{latest_val:,.0f} 件</b><br>
             <span style="color:{color}; font-weight:bold;">{icon} {label}</span><br>
             <small>{desc}</small><br>
-            <small>近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;|&nbsp; 近半年订单数：{latest['近半年订单数']} 单</small>
+            <small>当月准时率：{latest['当月准时率%']:.1f}% &nbsp;|&nbsp; 当月订单数：{latest['当月订单数']} 单</small>
         </div>
         """, unsafe_allow_html=True)
 
-        # 迷你折线图（完全保留）
         df_line = df_fac[["到货年月", "安全可放量产能"]].copy()
         df_line["到货年月"] = df_line["到货年月"].astype(str)
 
-        fig = px.line(
-            df_line,
-            x="到货年月",
-            y="安全可放量产能",
-            color_discrete_sequence=["#3b82f6"],
-            markers=True,
-            height=120
-        )
-        fig.update_layout(
-            margin=dict(l=0, r=0, t=0, b=0),
-            xaxis_title=None,
-            yaxis_title=None,
-            xaxis=dict(showticklabels=False),
-            yaxis=dict(showticklabels=False),
-            paper_bgcolor="rgba(0,0,0,0)",
-            plot_bgcolor="rgba(0,0,0,0)"
-        )
+        fig = px.line(df_line, x="到货年月", y="安全可放量产能",
+                      color_discrete_sequence=["#3b82f6"], markers=True, height=120)
+        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0),
+                          xaxis_title=None, yaxis_title=None,
+                          xaxis=dict(showticklabels=False), yaxis=dict(showticklabels=False),
+                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
 
 
