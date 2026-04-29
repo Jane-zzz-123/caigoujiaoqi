@@ -1700,7 +1700,7 @@ def get_trend_label(df_fac):
     else:
         return "小幅波动", "📊", "#3b82f6", f"正常波动 | 系数{cv:.1%}"
 
-# ====================== 卡片展示（不变） ======================
+# ====================== 卡片展示（已修改：中文日期+显示数值） ======================
 factories = df_trend["厂家"].unique()
 cols = st.columns(3)
 
@@ -1724,15 +1724,38 @@ for i, fac in enumerate(factories):
         </div>
         """, unsafe_allow_html=True)
 
+        # 处理日期为中文格式（如：26年3月）
         df_line = df_fac[["到货年月", "安全可放量产能"]].copy()
-        df_line["到货年月"] = df_line["到货年月"].astype(str)
+        # 把 "2026-03" 转成 "26年3月"
+        df_line["中文月份"] = pd.to_datetime(df_line["到货年月"]).dt.strftime("%y年%#m月")
 
-        fig = px.line(df_line, x="到货年月", y="安全可放量产能",
-                      color_discrete_sequence=["#3b82f6"], markers=True, height=120)
-        fig.update_layout(margin=dict(l=0, r=0, t=0, b=0),
-                          xaxis_title=None, yaxis_title=None,
-                          xaxis=dict(showticklabels=False), yaxis=dict(showticklabels=False),
-                          paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+        # 生成折线图
+        fig = px.line(
+            df_line,
+            x="中文月份",
+            y="安全可放量产能",
+            color_discrete_sequence=["#3b82f6"],
+            markers=True,
+            text="安全可放量产能",  # 每个点显示数值
+            height=120
+        )
+
+        # 美化图表：调整标签位置、隐藏多余元素
+        fig.update_traces(
+            textposition="top center",  # 数值标签在点上方居中
+            textfont=dict(size=10, color="#333")  # 数值字体大小
+        )
+
+        fig.update_layout(
+            margin=dict(l=0, r=0, t=20, b=0),  # 顶部留一点空间给数值标签
+            xaxis_title=None,
+            yaxis_title=None,
+            xaxis=dict(showticklabels=True, tickfont=dict(size=10)),  # 显示中文月份
+            yaxis=dict(showticklabels=False),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)"
+        )
+
         st.plotly_chart(fig, use_container_width=True)
 
 
