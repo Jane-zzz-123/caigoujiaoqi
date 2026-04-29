@@ -1757,18 +1757,3 @@ for i, fac in enumerate(factories):
         )
 
         st.plotly_chart(fig, use_container_width=True)
-
-
-# ========================================================================
-# 5. 履约等级变化趋势
-# ========================================================================
-st.subheader("🏅 履约等级月度变化")
-df_stat["履约等级"] = df_stat["准时率%"].apply(lambda x: "优质" if x>=90 else "合格" if x>=80 else "异常")
-fig_level = go.Figure()
-fig_level.add_trace(go.Scatter(
-    x=df_stat["到货月份_中文"], y=df_stat["准时率%"],
-    mode="lines+markers+text", text=df_stat["履约等级"],
-    textposition="top center", line=dict(color="#27AE60", width=3)
-))
-fig_level.update_layout(height=420, title=f"{selected_supplier} 履约等级变化", template="plotly_white", yaxis_range=[0, 105], yaxis_title="准时率 %", xaxis_title="月份")
-st.plotly_chart(fig_level, use_container_width=True)
