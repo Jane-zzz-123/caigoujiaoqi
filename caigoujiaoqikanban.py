@@ -857,6 +857,22 @@ def biz_quantile(series, q):
     idx = max(0, min(idx, len(s)-1))
     return s.iloc[idx]
 
+
+# ✅ 准时率计算函数，挪到这里（定义在调用之前）
+def calc_on_time_rate(group):
+    # 获取当前组的厂家和类目
+    factory, cat = group.name
+    # 从latest_mean中取出当前的采购交期均值
+    current_deadline = latest_mean[
+        (latest_mean["厂家"] == factory) &
+        (latest_mean["厂家类目明细"] == cat)
+        ]["当前采购交期均值"].iloc[0]
+
+    # 用实际交期和当前采购交期计算准时率
+    on_time_count = (group["实际采购交期"] <= current_deadline).sum()
+    total_count = len(group)
+    return on_time_count / total_count * 100 if total_count > 0 else 0.0
+
 # 历史履约分位&准时率计算
 actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
@@ -865,7 +881,7 @@ actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
     实际交期95分位=("实际采购交期", lambda x: biz_quantile(x, 0.95)),
     实际交期100分位=("实际采购交期", lambda x: biz_quantile(x, 1.0)),
     样本订单数=("采购单号", "count"),
-    准时率=("交期状态", lambda x: (x == "提前/准时").sum() / len(x) * 100)
+    准时率=("实际采购交期", calc_on_time_rate)
 ).reset_index()
 
 # 合并数据
