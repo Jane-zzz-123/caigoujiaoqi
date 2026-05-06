@@ -886,12 +886,10 @@ for c in cols_round:
     quantile_stats[c] = quantile_stats[c].round(2)
 quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
-# 交期优化建议逻辑
+# -------------------------- ✅ 这里已修改：建议只对比 80% 分位 --------------------------
 def get_delivery_advice(row):
     current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
-    q85 = row["实际交期85分位"]
-    q90 = row["实际交期90分位"]
     rate = row["准时率"]
     sample = row["样本订单数"]
 
@@ -899,35 +897,17 @@ def get_delivery_advice(row):
     if sample < min_sample:
         return "⚠️ 样本数据太少，暂不提出修改建议"
 
-    if rate < 80:
-        ref_q = q80
-    elif 80 <= rate < 90:
-        ref_q = q85
-    else:
-        ref_q = q90
+    # ✅ 固定只使用 80% 分位
+    ref_q = q80
 
     diff = abs(current - ref_q)
     if diff <= 2:
         return "✅ 偏差不大，现有交期合理，可继续保持"
 
-    if rate >= 90:
-        if current > ref_q:
-            return f"✅ 履约优秀，可适度下调至{ref_q}天，提升整体周转效率"
-        else:
-            return f"🟡 交期略偏紧张，建议小幅上调至{ref_q}天规避风险"
-
-    elif 80 <= rate < 90:
-        if current < ref_q:
-            return f"🟡 履约整体稳定，建议上调至{ref_q}天，减少逾期波动"
-        else:
-            return f"🟡 交期存在压缩空间，可下调至{ref_q}天优化交付"
-
+    if current < ref_q:
+        return f"🟡 建议上调至 {ref_q} 天，匹配历史80%订单履约水平"
     else:
-        if current < ref_q:
-            return f"🟠 履约偏弱，建议上调至{ref_q}天，大幅降低逾期风险"
-        else:
-            return "🟡 当前交期较为宽松，可根据放量需求适度收紧"
-
+        return f"✅ 可适度下调至 {ref_q} 天，提升周转效率"
 
 quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
 
