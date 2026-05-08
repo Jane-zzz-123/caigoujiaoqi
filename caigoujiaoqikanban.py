@@ -801,11 +801,11 @@ if latest_arrival_month is None:
     st.error("⚠️ 暂无任何有效采购交期数据，无法进行分析")
     st.stop()
 
-# 仅保留多选月份控件
+# ✅ 默认只选最新月份
 eval_months = st.multiselect(
-    "选择履约统计的历史月份（可多选，默认全选）",
+    "选择履约统计的历史月份（可多选，默认最新月份）",
     options=all_valid_months,
-    default=all_valid_months
+    default=[latest_arrival_month]
 )
 
 if not eval_months:
@@ -857,8 +857,7 @@ def biz_quantile(series, q):
     idx = max(0, min(idx, len(s)-1))
     return s.iloc[idx]
 
-
-# 历史履约分位（先只算分位数，准时率后面算）
+# 历史履约分位
 actual_stats = df_actual.groupby(["厂家", "产品分类"]).agg(
     实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
     实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
@@ -876,33 +875,25 @@ quantile_stats = pd.merge(
     how="inner"
 )
 
-
-# ===================== ✅ 在这里算准时率（绝对不会报错） =====================
+# 计算真实准时率
 def calculate_real_on_rate(row):
-    # 拿到当前 厂家+类目 的历史所有订单
     factory = row["厂家"]
     cat = row["产品分类"]
     current_delivery = row["当前采购交期均值"]
 
-    # 筛选历史订单
     hist = df_actual[
         (df_actual["厂家"] == factory) &
         (df_actual["产品分类"] == cat)
-        ]
-
+    ]
     if hist.empty:
         return 0
-
-    # ✅ 真实准时率 = 实际交期 ≤ 当前采购交期 的订单占比
     on_time = (hist["实际采购交期"] <= current_delivery).sum()
     total = len(hist)
     return round(on_time / total * 100, 1)
 
-
-# 应用计算
 quantile_stats["准时率"] = quantile_stats.apply(calculate_real_on_rate, axis=1)
 
-# 数值格式规整
+# 数值格式化
 cols_round = [
     "当前采购交期均值",
     "实际交期80分位", "实际交期85分位",
@@ -912,32 +903,27 @@ for c in cols_round:
     quantile_stats[c] = quantile_stats[c].round(2)
 quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 
-# -------------------------- ✅ 这里已修改：建议只对比 80% 分位 --------------------------
+# 交期建议
 def get_delivery_advice(row):
     current = row["当前采购交期均值"]
     q80 = row["实际交期80分位"]
     rate = row["准时率"]
     sample = row["样本订单数"]
-
     min_sample = 5
     if sample < min_sample:
         return "⚠️ 样本数据太少，暂不提出修改建议"
-
-    # ✅ 固定只使用 80% 分位
     ref_q = q80
-
     diff = abs(current - ref_q)
     if diff <= 2:
         return "✅ 偏差不大，现有交期合理，可继续保持"
-
     if current < ref_q:
-        return f"🟡 建议上调至 {ref_q} 天，匹配历史80%订单履约水平"
+        return f"🟡 建议上调至 {ref_q} 天"
     else:
-        return f"✅ 可适度下调至 {ref_q} 天，提升周转效率"
+        return f"✅ 可适度下调至 {ref_q} 天"
 
 quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
 
-# 渲染分析卡片
+# ====================== 卡片 + 正确的累计占比柱形图 ======================
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
 card_idx = 0
@@ -955,6 +941,7 @@ for _, row in quantile_stats.iterrows():
     q100 = row["实际交期100分位"]
     advice = row["采购交期修改建议"]
 
+    # 卡片颜色
     if rate >= 90:
         bg = "#f0fdf4"
         border = "#22c55e"
@@ -966,40 +953,57 @@ for _, row in quantile_stats.iterrows():
         border = "#ef4444"
 
     with cols[card_idx % 4]:
+        # 卡片主体
         st.markdown(f"""
-<div style="background:{bg}; border:2px solid {border}; border-radius:12px; padding:18px; margin-bottom:16px;">
-
-**🏭 {factory}**  
-
-{cat}
-
-<p style="font-size:14px; margin:8px 0 4px 0;">
-最新采购交期：{current_day}天（准时率{rate}%）
+<div style="background:{bg}; border:2px solid {border}; border-radius:12px; padding:18px; margin-bottom:8px;">
+**🏭 {factory}**<br>{cat}
+<p style="font-size:14px;">最新采购交期：{current_day}天（准时率{rate}%）</p>
+<p style="font-size:12px; color:#555;">样本：{sample} 单</p>
+<p style="font-size:12px; color:#71717a;">
+80%：{q80}天｜85%：{q85}天<br/>
+90%：{q90}天｜95%：{q95}天<br/>
+100%：{q100}天
 </p>
-
-<p style="font-size:12px; color:#555; margin:4px 0 12px 0;">
-统计样本：{sample} 单
-</p>
-
-<p style="font-size:12px; color:#71717a; line-height:1.6; margin:8px 0;">
-<span style="display:inline-block; width:48%;">80% 订单达成：{q80}天</span>
-<span style="display:inline-block; width:48%;">85% 订单达成：{q85}天</span><br>
-<span style="display:inline-block; width:48%;">90% 订单达成：{q90}天</span>
-<span style="display:inline-block; width:48%;">95% 订单达成：{q95}天</span><br>
-<span style="font-size:11px; color:#999;">100% 订单达成：{q100}天</span>
-</p>
-
-<hr style="margin:12px 0; border:none; border-top:1px solid #ddd;">
-
-<div style="font-size:14px; line-height:1.5;">
-💡 <b>建议：</b>{advice}
-</div>
-
+<hr style="margin:8px 0; border-top:1px solid #ddd;">
+<div style="font-size:14px;">💡 <b>建议：</b>{advice}</div>
 </div>
 """, unsafe_allow_html=True)
+
+        # ====================== ✅ 你要的：横坐标=交期天数，纵坐标=累计占比 ======================
+        try:
+            hist_delivery = df_actual[
+                (df_actual["厂家"] == factory) &
+                (df_actual["产品分类"] == cat)
+            ]["实际采购交期"].dropna().sort_values().to_frame()
+
+            if not hist_delivery.empty:
+                total = len(hist_delivery)
+                hist_delivery["累计订单数"] = range(1, total + 1)
+                hist_delivery["累计占比(%)"] = (hist_delivery["累计订单数"] / total * 100).round(1)
+
+                fig = px.bar(
+                    hist_delivery,
+                    x="实际采购交期",
+                    y="累计占比(%)",
+                    color="累计占比(%)",
+                    color_continuous_scale="Blues",
+                    text="累计占比(%)"
+                )
+                fig.update_traces(textposition="outside", texttemplate="%{text:.0f}%", width=1.2)
+                fig.update_layout(
+                    height=180,
+                    margin=dict(l=8, r=8, t=8, b=8),
+                    xaxis_title="实际采购交期（天）",
+                    yaxis_title="累计订单占比（%）",
+                    coloraxis_showscale=False
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception:
+            st.caption("📊 图表生成失败")
+
     card_idx += 1
 
-# 明细数据表格
+# 明细表格
 st.markdown("#### 📊 交期分位数分析明细表格")
 st.dataframe(quantile_stats, use_container_width=True, hide_index=True)
 
