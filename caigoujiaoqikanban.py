@@ -318,7 +318,7 @@ st.markdown("---")
 st.subheader("📋 交期数据明细")
 table_cols = [
     "到货年月", "交期状态", "厂家", "下单时间", "预计到货时间修改","采购单号", "品名", "SKU","采购量",
-    "厂家类目明细", "产品分类", "采购交期", "实际采购交期", "预计-实际交期的差值"
+    "产品分类", "采购交期", "实际采购交期", "预计-实际交期的差值"
 ]
 df_table = df_current.copy()
 
@@ -678,14 +678,14 @@ st.subheader("🏷️ 厂家 - 全品类明细履约分析（按准时率自动�
 
 df_category = df_current[
     (df_current["厂家"].notna()) &
-    (df_current["厂家类目明细"].notna())
+    (df_current["产品分类"].notna())
 ].copy()
 
 if df_category.empty:
-    st.warning("当前筛选条件下无厂家类目明细数据")
+    st.warning("当前筛选条件下无产品分类数据")
 else:
     # 1. 统计每个厂家 + 每个品类 的数据
-    category_stats = df_category.groupby(["厂家", "厂家类目明细"]).agg(
+    category_stats = df_category.groupby(["厂家", "产品分类"]).agg(
         订单数=("采购单号", "count"),
         准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
         逾期数=("交期状态", lambda x: (x == "逾期").sum()),
@@ -737,7 +737,7 @@ else:
         # 品类明细（自动上色 + 显示全部字段）
         cat_lines = []
         for _, row in cats.iterrows():
-            c_name = row["厂家类目明细"]
+            c_name = row["产品分类"]
             c_num = row["订单数"]
             c_on = row["准时数"]
             c_over = row["逾期数"]
@@ -833,18 +833,18 @@ st.markdown("---")
 # 清洗有效数据
 df_actual = df_actual[
     df_actual["厂家"].notna() &
-    df_actual["厂家类目明细"].notna() &
+    df_actual["产品分类"].notna() &
     df_actual["实际采购交期"].notna()
 ].copy()
 
 df_latest = df_latest[
     df_latest["厂家"].notna() &
-    df_latest["厂家类目明细"].notna() &
+    df_latest["产品分类"].notna() &
     df_latest["采购交期"].notna()
 ].copy()
 
 # 最新月基准交期均值
-latest_mean = df_latest.groupby(["厂家", "厂家类目明细"]).agg(
+latest_mean = df_latest.groupby(["厂家", "产品分类"]).agg(
     当前采购交期均值=("采购交期", "mean")
 ).reset_index()
 
@@ -859,7 +859,7 @@ def biz_quantile(series, q):
 
 
 # 历史履约分位（先只算分位数，准时率后面算）
-actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
+actual_stats = df_actual.groupby(["厂家", "产品分类"]).agg(
     实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
     实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
     实际交期90分位=("实际采购交期", lambda x: biz_quantile(x, 0.9)),
@@ -872,7 +872,7 @@ actual_stats = df_actual.groupby(["厂家", "厂家类目明细"]).agg(
 quantile_stats = pd.merge(
     latest_mean,
     actual_stats,
-    on=["厂家", "厂家类目明细"],
+    on=["厂家", "产品分类"],
     how="inner"
 )
 
@@ -881,13 +881,13 @@ quantile_stats = pd.merge(
 def calculate_real_on_rate(row):
     # 拿到当前 厂家+类目 的历史所有订单
     factory = row["厂家"]
-    cat = row["厂家类目明细"]
+    cat = row["产品分类"]
     current_delivery = row["当前采购交期均值"]
 
     # 筛选历史订单
     hist = df_actual[
         (df_actual["厂家"] == factory) &
-        (df_actual["厂家类目明细"] == cat)
+        (df_actual["产品分类"] == cat)
         ]
 
     if hist.empty:
@@ -944,7 +944,7 @@ card_idx = 0
 
 for _, row in quantile_stats.iterrows():
     factory = row["厂家"]
-    cat = row["厂家类目明细"]
+    cat = row["产品分类"]
     current_day = row["当前采购交期均值"]
     sample = int(row["样本订单数"])
     rate = row["准时率"]
