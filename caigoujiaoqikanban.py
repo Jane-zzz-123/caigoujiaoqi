@@ -859,11 +859,12 @@ def biz_quantile(series, q):
 
 # 历史履约分位
 actual_stats = df_actual.groupby(["厂家", "产品分类"]).agg(
-    实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.8)),
+    实际交期75分位=("实际采购交期", lambda x: biz_quantile(x, 0.75)),
+    实际交期80分位=("实际采购交期", lambda x: biz_quantile(x, 0.80)),
     实际交期85分位=("实际采购交期", lambda x: biz_quantile(x, 0.85)),
-    实际交期90分位=("实际采购交期", lambda x: biz_quantile(x, 0.9)),
+    实际交期90分位=("实际采购交期", lambda x: biz_quantile(x, 0.90)),
     实际交期95分位=("实际采购交期", lambda x: biz_quantile(x, 0.95)),
-    实际交期100分位=("实际采购交期", lambda x: biz_quantile(x, 1.0)),
+    实际交期100分位=("实际采购交期", lambda x: biz_quantile(x, 1.00)),
     样本订单数=("采购单号", "count"),
 ).reset_index()
 
@@ -896,7 +897,7 @@ quantile_stats["准时率"] = quantile_stats.apply(calculate_real_on_rate, axis=
 # 数值格式化
 cols_round = [
     "当前采购交期均值",
-    "实际交期80分位", "实际交期85分位",
+    "实际交期75分位", "实际交期80分位", "实际交期85分位",
     "实际交期90分位", "实际交期95分位", "实际交期100分位"
 ]
 for c in cols_round:
@@ -923,7 +924,7 @@ def get_delivery_advice(row):
 
 quantile_stats["采购交期修改建议"] = quantile_stats.apply(get_delivery_advice, axis=1)
 
-# ====================== 卡片 + 正确的累计占比柱形图 ======================
+# ====================== 卡片 + 和你发的图一模一样的双轴组合图 ======================
 st.markdown("#### 📋 各厂家+类目明细交期分析卡片")
 cols = st.columns(4)
 card_idx = 0
@@ -934,6 +935,7 @@ for _, row in quantile_stats.iterrows():
     current_day = row["当前采购交期均值"]
     sample = int(row["样本订单数"])
     rate = row["准时率"]
+    q75 = row["实际交期75分位"]
     q80 = row["实际交期80分位"]
     q85 = row["实际交期85分位"]
     q90 = row["实际交期90分位"]
@@ -960,46 +962,102 @@ for _, row in quantile_stats.iterrows():
 <p style="font-size:14px;">最新采购交期：{current_day}天（准时率{rate}%）</p>
 <p style="font-size:12px; color:#555;">样本：{sample} 单</p>
 <p style="font-size:12px; color:#71717a;">
-80%：{q80}天｜85%：{q85}天<br/>
-90%：{q90}天｜95%：{q95}天<br/>
-100%：{q100}天
+75%：{q75}天｜80%：{q80}天<br/>
+85%：{q85}天｜90%：{q90}天<br/>
+95%：{q95}天｜100%：{q100}天
 </p>
 <hr style="margin:8px 0; border-top:1px solid #ddd;">
 <div style="font-size:14px;">💡 <b>建议：</b>{advice}</div>
 </div>
 """, unsafe_allow_html=True)
 
-        # ====================== ✅ 你要的：横坐标=交期天数，纵坐标=累计占比 ======================
+        # ====================== ✅ 和示例图一模一样的双轴组合图 ======================
         try:
-            hist_delivery = df_actual[
+            # 取出当前厂家+类目的实际交期数据
+            hist_data = df_actual[
                 (df_actual["厂家"] == factory) &
                 (df_actual["产品分类"] == cat)
-            ]["实际采购交期"].dropna().sort_values().to_frame()
+            ]["实际采购交期"].dropna()
 
-            if not hist_delivery.empty:
-                total = len(hist_delivery)
-                hist_delivery["累计订单数"] = range(1, total + 1)
-                hist_delivery["累计占比(%)"] = (hist_delivery["累计订单数"] / total * 100).round(1)
+            if len(hist_data) > 0:
+                # 1. 按天数分组统计订单数
+                daily_counts = hist_data.value_counts().sort_index().reset_index()
+                daily_counts.columns = ["实际采购交期", "订单数"]
+                daily_counts = daily_counts.sort_values("实际采购交期")
 
-                fig = px.bar(
-                    hist_delivery,
-                    x="实际采购交期",
-                    y="累计占比(%)",
-                    color="累计占比(%)",
-                    color_continuous_scale="Blues",
-                    text="累计占比(%)"
+                # 2. 计算累计占比（阶梯线）
+                daily_counts["累计订单数"] = daily_counts["订单数"].cumsum()
+                daily_counts["累计准时率"] = (daily_counts["累计订单数"] / len(hist_data) * 100).round(1)
+
+                # 3. 创建双轴图
+                fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+                # 左轴：柱状图（订单数）
+                fig.add_trace(
+                    go.Bar(
+                        x=daily_counts["实际采购交期"],
+                        y=daily_counts["订单数"],
+                        name="各时效订单数",
+                        marker_color="#a6d8f0"
+                    ),
+                    secondary_y=False
                 )
-                fig.update_traces(textposition="outside", texttemplate="%{text:.0f}%", width=1.2)
+
+                # 右轴：阶梯线（累计准时率）
+                fig.add_trace(
+                    go.Scatter(
+                        x=daily_counts["实际采购交期"],
+                        y=daily_counts["累计准时率"],
+                        name="累计占比（准时率）",
+                        mode="lines+markers",
+                        line=dict(color="#ff3333", width=2, shape="hv"),
+                        marker=dict(color="darkblue", size=8, symbol="star")
+                    ),
+                    secondary_y=True
+                )
+
+                # 4. 添加分位数标注（和示例图一致）
+                quantile_points = [
+                    (75, q75),
+                    (80, q80),
+                    (85, q85),
+                    (90, q90),
+                    (95, q95),
+                    (100, q100)
+                ]
+                for pct, day in quantile_points:
+                    if pd.notna(day):
+                        fig.add_annotation(
+                            x=day,
+                            y=pct,
+                            text=f"{pct}% → {day}天",
+                            showarrow=False,
+                            yshift=10,
+                            font=dict(size=10, color="#666")
+                        )
+
+                # 5. 布局设置
                 fig.update_layout(
-                    height=180,
-                    margin=dict(l=8, r=8, t=8, b=8),
+                    height=200,
+                    margin=dict(l=10, r=10, t=10, b=10),
                     xaxis_title="实际采购交期（天）",
-                    yaxis_title="累计订单占比（%）",
-                    coloraxis_showscale=False
+                    yaxis_title="订单数",
+                    yaxis2=dict(
+                        title="累计占比（准时率）(%)",
+                        range=[0, 105],
+                        showgrid=False
+                    ),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
                 )
                 st.plotly_chart(fig, use_container_width=True)
-        except Exception:
-            st.caption("📊 图表生成失败")
+        except Exception as e:
+            st.caption(f"📊 图表生成失败：{str(e)[:20]}")
 
     card_idx += 1
 
