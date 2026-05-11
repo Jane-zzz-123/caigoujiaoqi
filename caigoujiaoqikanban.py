@@ -909,13 +909,13 @@ quantile_stats["准时率"] = quantile_stats["准时率"].round(1)
 # 交期建议
 def get_delivery_advice(row):
     current = row["当前采购交期均值"]
-    q80 = row["实际交期80分位"]
+    q90 = row["实际交期90分位"]
     rate = row["准时率"]
     sample = row["样本订单数"]
     min_sample = 5
     if sample < min_sample:
         return "⚠️ 样本数据太少，暂不提出修改建议"
-    ref_q = q80
+    ref_q = q90
     diff = abs(current - ref_q)
     if diff <= 2:
         return "✅ 偏差不大，现有交期合理，可继续保持"
