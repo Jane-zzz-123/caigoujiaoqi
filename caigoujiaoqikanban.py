@@ -1157,6 +1157,10 @@ st.info("""
 st.markdown("---")
 st.subheader("💡 各品类采购下单建议")
 
+# ===================== 新增：品类风险筛选器（下拉单选） =====================
+filter_options = ["全部显示", "仅显示【暂无优质供方】", "仅显示【单一供应风险】"]
+selected_filter = st.selectbox("筛选风险品类", filter_options)
+
 # ===================== 统计在售产品数量（绝对不报错版） =====================
 df_on_sale = df_product_info[df_product_info["是否在售"] == "是"].copy()
 prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
@@ -1164,9 +1168,26 @@ prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# 3列循环排版
-for i in range(0, len(cate_list), 3):
-    batch = cate_list[i:i+3]
+# ===================== 新增：根据筛选条件过滤品类 =====================
+filtered_cate_list = []
+for cate, group_data in cate_list:
+    good_df = group_data[group_data["等级"] == "🟢 优质"]
+    has_no_good_supplier = good_df.empty
+    has_single_supplier = (group_data["厂家数"].iloc[0] == 1)
+
+    # 筛选逻辑
+    if selected_filter == "全部显示":
+        filtered_cate_list.append((cate, group_data))
+    elif selected_filter == "仅显示【暂无优质供方】":
+        if has_no_good_supplier:
+            filtered_cate_list.append((cate, group_data))
+    elif selected_filter == "仅显示【单一供应风险】":
+        if has_single_supplier:
+            filtered_cate_list.append((cate, group_data))
+
+# 3列循环排版（使用过滤后的列表）
+for i in range(0, len(filtered_cate_list), 3):
+    batch = filtered_cate_list[i:i+3]
     cols = st.columns(3)
 
     for idx, (cate, group_data) in enumerate(batch):
