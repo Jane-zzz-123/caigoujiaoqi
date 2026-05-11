@@ -1296,9 +1296,9 @@ st.header("🏭 厂家产能&准时率综合分析")
 st.markdown("""
 <div style="font-size:15px; background-color:#f8f9fa; padding:12px 16px; border-radius:10px; line-height:1.6;">
 <b>📌 安全可放量产能 · 计算说明</b><br>
-• 近半年平均产能：厂家过去6个月实际月均交付能力<br>
-• 近半年准时率：厂家历史履约靠谱程度（%）<br>
-• <b>安全可放量产能 = 近半年平均产能 × 近半年准时率</b><br>
+• 近三个月平均产能：厂家过去3个月实际月均交付能力<br>
+• 近三个月准时率：厂家历史履约靠谱程度（%）<br>
+• <b>安全可放量产能 = 近三个月平均产能 × 近三个月准时率</b><br>
 """, unsafe_allow_html=True)
 
 df_final = df.copy()
@@ -1354,12 +1354,12 @@ orders_12m = orders_12m.rename("近一年订单数")
 
 cap_max = cap_max.rename("历史最高单月产能")
 
-# 近半年准时率
-df_p6 = df_final[df_final["到货年月"].isin(p6)].copy()
-if not df_p6.empty:
-    df_p6["准时标记"] = (df_p6["交期状态"] == "提前/准时").astype(int)
-    on_time_rate = df_p6.groupby("厂家")["准时标记"].mean() * 100
-    on_time_rate = on_time_rate.round(1).rename("近半年准时率%")
+# ===================== 核心修改：近三个月准时率 =====================
+df_p3 = df_final[df_final["到货年月"].isin(p3)].copy()
+if not df_p3.empty:
+    df_p3["准时标记"] = (df_p3["交期状态"] == "提前/准时").astype(int)
+    on_time_rate = df_p3.groupby("厂家")["准时标记"].mean() * 100
+    on_time_rate = on_time_rate.round(1).rename("近三个月准时率%")
 else:
     on_time_rate = pd.Series(dtype=float)
 
@@ -1372,8 +1372,8 @@ result = pd.concat([
     on_time_rate
 ], axis=1).fillna(0).reset_index()
 
-# 安全可放量产能
-result["安全可放量产能"] = (result["近半年平均产能（基准）"] * result["近半年准时率%"] / 100).round(0)
+# ===================== 核心修改：安全可放量产能 = 近3个月平均产能 × 近3个月准时率 =====================
+result["安全可放量产能"] = (result["近3个月平均产能"] * result["近三个月准时率%"] / 100).round(0)
 
 # 展示列（按你习惯的顺序，新增了订单数）
 show_cols = [
@@ -1385,7 +1385,7 @@ show_cols = [
     "近一年订单数",
     "近一年平均产能",
     "历史最高单月产能",
-    "近半年准时率%",
+    "近三个月准时率%",
     "安全可放量产能"
 ]
 
@@ -1401,7 +1401,7 @@ st.dataframe(
         "近一年订单数": "{:,.0f}",
         "近一年平均产能": "{:,.0f}",
         "历史最高单月产能": "{:,.0f}",
-        "近半年准时率%": "{:.1f}%",
+        "近三个月准时率%": "{:.1f}%",
         "安全可放量产能": "{:,.0f}"
     }), use_container_width=True, height=600
 )
