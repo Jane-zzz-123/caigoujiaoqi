@@ -606,12 +606,18 @@ if not df_current.empty:
 # -------------------------- 逾期分析 --------------------------
 # -------------------------- 厂家履约评级分析（按准时率） --------------------------
 st.subheader("⚠️ 厂家履约评级分析（按准时率）")
-# 新增：过滤空值 + 仅保留有效数据行
+
+# 改成：下拉单选框（全部 / 优质 / 合格 / 异常）
+rating_options = ["全部", "优质", "合格", "异常"]
+selected_rating = st.selectbox("筛选厂家履约评级", rating_options)
+
+# 过滤空值 + 仅保留有效数据行
 df_valid = df_current[
-    df_current["厂家"].notna() &  # 过滤空厂家
-    df_current["采购单号"].notna()  # 过滤空订单号
+    df_current["厂家"].notna() &
+    df_current["采购单号"].notna()
 ].copy()
-# 计算所有厂家指标（新增：采购量、到货量）
+
+# 计算所有厂家指标
 factory_analysis = df_current.groupby("厂家").agg(
     订单总数=("采购单号", "count"),
     准时订单数=("交期状态", lambda x: (x == "提前/准时").sum()),
@@ -622,19 +628,33 @@ factory_analysis = df_current.groupby("厂家").agg(
     到货量合计=("到货量", "sum")
 ).reset_index()
 
-# 计算整体总计（用于占比）
+# 计算整体总计
 total_purchase = factory_analysis["采购量合计"].sum()
 total_arrival = factory_analysis["到货量合计"].sum()
 
 # 计算指标
-# 修复：处理除数为0 + 转换为numpy数组避免Arrow类型问题
 factory_analysis["准时率"] = (
     (factory_analysis["准时订单数"].astype(np.float64) /
      factory_analysis["订单总数"].replace(0, np.nan).astype(np.float64) * 100)
-).round(1).fillna(0.0)  # 0值替换为NaN再计算，最后填充0
+).round(1).fillna(0.0)
 factory_analysis["订单占比"] = (factory_analysis["订单总数"] / factory_analysis["订单总数"].sum() * 100).round(1)
 factory_analysis["采购量占比"] = (factory_analysis["采购量合计"] / total_purchase * 100).round(2)
 factory_analysis["到货量占比"] = (factory_analysis["到货量合计"] / total_arrival * 100).round(2)
+
+# 生成评级
+def get_rating(rate):
+    if rate >= 90:
+        return "优质"
+    elif rate >= 80:
+        return "合格"
+    else:
+        return "异常"
+
+factory_analysis["评级"] = factory_analysis["准时率"].apply(get_rating)
+
+# 下拉筛选逻辑
+if selected_rating != "全部":
+    factory_analysis = factory_analysis[factory_analysis["评级"] == selected_rating]
 
 # 排序
 factory_analysis = factory_analysis.sort_values("订单总数", ascending=False).reset_index(drop=True)
@@ -642,7 +662,6 @@ factory_analysis = factory_analysis.sort_values("订单总数", ascending=False)
 # 一行四列卡片展示
 cols = st.columns(4)
 for idx, row in factory_analysis.iterrows():
-    # 评级 + 颜色
     rate = row["准时率"]
     if rate >= 90:
         level = "优质"
