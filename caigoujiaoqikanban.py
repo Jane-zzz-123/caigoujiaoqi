@@ -1157,35 +1157,98 @@ st.info("""
 st.markdown("---")
 st.subheader("💡 各品类采购下单建议")
 
-# ===================== 新增：品类风险筛选器（下拉单选） =====================
-filter_options = ["全部显示", "仅显示【暂无优质供方】", "仅显示【单一供应风险】"]
-selected_filter = st.selectbox("筛选风险品类", filter_options)
+# ===================== 一行两列：到货月份多选 + 风险筛选 =====================
+col_month, col_risk = st.columns(2)
 
-# ===================== 统计在售产品数量（绝对不报错版） =====================
-df_on_sale = df_product_info[df_product_info["是否在售"] == "是"].copy()
-prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
+# 1. 到货年月筛选器：默认最新月份，支持多选
+with col_month:
+    available_months = sorted(df["到货年月"].dropna().unique(), reverse=True)
+    default_month = available_months[0] if len(available_months) > 0 else None
+    selected_months = st.multiselect(
+        "📅 筛选到货年月（可多选合并）",
+        options=available_months,
+        default=default_month,
+    )
 
+# 2. 风险品类筛选（保持你原来的）
+with col_risk:
+    filter_options = ["全部显示", "仅显示【暂无优质供方】", "仅显示【单一供应风险】"]
+    selected_filter = st.selectbox("⚠️ 筛选风险品类", filter_options)
+
+# ===================== 根据多选月份合并数据 =====================
+df_filtered_by_month = df[df["到货年月"].isin(selected_months)].copy()
+
+# ===================== 重新计算 compare_df（基于合并后多月数据） =====================
+df_valid_multi = df_filtered_by_month[
+    df_filtered_by_month["厂家"].notna() &
+    df_filtered_by_month["采购单号"].notna()
+].copy()
+
+compare_df = df_valid_multi.groupby(["产品分类", "厂家"]).agg(
+    订单数=("采购单号", "count"),
+    准时数=("交期状态", lambda x: (x == "提前/准时").sum()),
+    逾期数=("交期状态", lambda x: (x == "逾期").sum()),
+    平均交期=("实际采购交期", "mean"),
+    采购量=("采购量", "sum"),
+).reset_index()
+
+# 准时率
+compare_df["准时率%"] = (
+    compare_df["准时数"] / compare_df["订单数"] * 100
+).fillna(0).round(1)
+
+# 等级
+def level(rate):
+    if rate >= 90:
+        return "🟢 优质"
+    elif rate >= 80:
+        return "🟡 合格"
+    else:
+        return "🔴 异常"
+compare_df["等级"] = compare_df["准时率%"].apply(level)
+
+# 分类总采购量（用于排序）
+category_sum = compare_df.groupby("产品分类")["采购量"].sum().reset_index()
+category_sum.columns = ["产品分类", "分类总采购量"]
+compare_df = compare_df.merge(category_sum, on="产品分类")
+
+# 采购量占比
+compare_df["采购量占比%"] = (compare_df["采购量"] / compare_df["分类总采购量"] * 100).round(2)
+
+# 厂家数
+supplier_count = compare_df.groupby("产品分类")["厂家"].nunique().reset_index()
+supplier_count.columns = ["产品分类", "厂家数"]
+compare_df = compare_df.merge(supplier_count, on="产品分类")
+
+# 排序
+compare_df = compare_df.sort_values(
+    by=["分类总采购量", "采购量"], ascending=[False, False]
+).reset_index(drop=True)
+
+# ===================== 风险过滤逻辑 =====================
 summary_group = compare_df.groupby("产品分类", sort=False)
 cate_list = list(summary_group)
 
-# ===================== 新增：根据筛选条件过滤品类 =====================
 filtered_cate_list = []
 for cate, group_data in cate_list:
     good_df = group_data[group_data["等级"] == "🟢 优质"]
-    has_no_good_supplier = good_df.empty
-    has_single_supplier = (group_data["厂家数"].iloc[0] == 1)
+    has_no_good = good_df.empty
+    has_single = (group_data["厂家数"].iloc[0] == 1)
 
-    # 筛选逻辑
     if selected_filter == "全部显示":
         filtered_cate_list.append((cate, group_data))
     elif selected_filter == "仅显示【暂无优质供方】":
-        if has_no_good_supplier:
+        if has_no_good:
             filtered_cate_list.append((cate, group_data))
     elif selected_filter == "仅显示【单一供应风险】":
-        if has_single_supplier:
+        if has_single:
             filtered_cate_list.append((cate, group_data))
 
-# 3列循环排版（使用过滤后的列表）
+# ===================== 在售产品数量 =====================
+df_on_sale = df_product_info[df_product_info["是否在售"] == "是"].copy()
+prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
+
+# ===================== 3列卡片展示 =====================
 for i in range(0, len(filtered_cate_list), 3):
     batch = filtered_cate_list[i:i+3]
     cols = st.columns(3)
@@ -1193,44 +1256,33 @@ for i in range(0, len(filtered_cate_list), 3):
     for idx, (cate, group_data) in enumerate(batch):
         with cols[idx]:
             with st.container(border=True):
-                # 品类标题 + 在售数量
                 prod_num = prod_count_map.get(cate, 0)
                 st.markdown(f"**📦 {cate}（在售产品：{prod_num} 款）**")
 
-                # 1. 优质厂家
                 good_df = group_data[group_data["等级"] == "🟢 优质"]
                 if not good_df.empty:
                     st.success("✅ 优先下单")
                     for _, r in good_df.iterrows():
                         st.caption(
-                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
-                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
-                            f"准时率：{r['准时率%']}%"
+                            f"{r['厂家']}｜{int(r['订单数'])}单｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                         )
 
-                # 2. 合格厂家
                 normal_df = group_data[group_data["等级"] == "🟡 合格"]
                 if not normal_df.empty:
                     st.warning("⚠️ 适量下单")
                     for _, r in normal_df.iterrows():
                         st.caption(
-                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
-                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
-                            f"准时率：{r['准时率%']}%"
+                            f"{r['厂家']}｜{int(r['订单数'])}单｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                         )
 
-                # 3. 异常厂家
                 bad_df = group_data[group_data["等级"] == "🔴 异常"]
                 if not bad_df.empty:
                     st.error("🔴 严控订单")
                     for _, r in bad_df.iterrows():
                         st.caption(
-                            f"{r['厂家']} | 订单数：{int(r['订单数'])}单 | "
-                            f"准时订单数：{int(r['准时数'])}单 | 逾期订单数：{int(r['逾期数'])}单 | "
-                            f"准时率：{r['准时率%']}%"
+                            f"{r['厂家']}｜{int(r['订单数'])}单｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                         )
 
-                # 风险提示（带产品数量，优先级清晰）
                 if good_df.empty:
                     st.info(f"💡 暂无优质供方｜在售 {prod_num} 款需开发新厂家")
                 if group_data["厂家数"].iloc[0] == 1:
