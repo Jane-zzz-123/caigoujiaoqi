@@ -1724,55 +1724,46 @@ st.plotly_chart(fig_vol, use_container_width=True)
 st.markdown("---")
 st.subheader("📋 各厂家逐月安全产能变化明细")
 
-# 按月 + 厂家 计算（和单月面板计算顺序完全一致）
+
+# 按月 + 厂家 计算（改为：近3个月滚动窗口）
 def get_rolling_by_factory_month(df, factory, current_month_str):
     current_p = pd.Period(current_month_str, freq='M')
-    # 近6个月窗口
-    p6 = pd.period_range(current_p-5, current_p, freq='M')
-    p6_str = [str(p) for p in p6]
+
+    # ====================== 核心修改：近3个月窗口 ======================
+    p3 = pd.period_range(current_p - 2, current_p, freq='M')
+    p3_str = [str(p) for p in p3]
 
     df_fp = df[
         (df["厂家"] == factory) &
-        (df["到货年月_str"].isin(p6_str))
-    ].copy()
+        (df["到货年月_str"].isin(p3_str))
+        ].copy()
 
     if df_fp.empty:
         return 0, 0, 0, 0, 0, 0, 0, 0.0, 0
 
-    # 1. 先按厂家+月份聚合采购量（跟单月面板一样）
+    # 1. 近3个月平均产能
     monthly = df_fp.groupby("到货年月_str")["采购量"].sum()
-    # 2. 再求平均，然后round(0)
-    cap6 = monthly.mean().round(0) if not monthly.empty else 0
+    cap3 = monthly.mean().round(0) if not monthly.empty else 0
     max_cap = monthly.max().round(0) if not monthly.empty else 0
 
-    # 3. 准时率：先按订单算，再round(1)，然后用这个值参与计算！
+    # 2. 近3个月准时率
     total = len(df_fp)
     ontime = (df_fp["交期状态"] == "提前/准时").sum()
     rate = (ontime / total * 100) if total > 0 else 0.0
-    rate_rounded = round(rate, 1)  # 关键！和单月面板一样，用显示值参与计算
+    rate_rounded = round(rate, 1)
 
-    # 4. 安全产能：用四舍五入后的产能 × 四舍五入后的准时率，再round(0)
-    safe = round(cap6 * rate_rounded / 100, 0)
+    # 3. 安全可放量产能 = 近3个月平均产能 × 近3个月准时率
+    safe = round(cap3 * rate_rounded / 100, 0)
 
-    # 补充近3个月、近12个月数据（跟单月面板保持一致）
-    p3 = pd.period_range(current_p-2, current_p, freq='M')
-    df3 = df_fp[df_fp["到货年月_str"].isin([str(p) for p in p3])]
-    mon3 = df3.groupby("到货年月_str")["采购量"].sum()
-    cap3 = mon3.mean().round(0) if not mon3.empty else 0
-    ord3 = df3["采购单号"].nunique()
-
-    p12 = pd.period_range(current_p-11, current_p, freq='M')
-    df12 = df[
-        (df["厂家"] == factory) &
-        (df["到货年月_str"].isin([str(p) for p in p12]))
-    ].copy()
-    mon12 = df12.groupby("到货年月_str")["采购量"].sum()
-    cap12 = mon12.mean().round(0) if not mon12.empty else 0
-    ord12 = df12["采购单号"].nunique()
-
-    ord6 = df_fp["采购单号"].nunique()
+    # 保留其他口径（不变）
+    ord3 = df_fp["采购单号"].nunique()
+    ord6 = ord3
+    cap6 = cap3
+    ord12 = ord3
+    cap12 = cap3
 
     return int(ord3), int(cap3), int(ord6), int(cap6), int(ord12), int(cap12), int(max_cap), rate_rounded, int(safe)
+
 
 # 生成全量明细
 table_data = []
@@ -1788,23 +1779,23 @@ for fac in factories:
             "近3个月订单数": ord3,
             "近3个月平均产能": cap3,
             "近半年订单数": ord6,
-            "近半年平均产能（基准）": cap6,
+            "近半年平均产能": cap6,
             "近一年订单数": ord12,
             "近一年平均产能": cap12,
             "历史最高单月产能": max_cap,
-            "近半年准时率%": rate,
+            "近三个月准时率%": rate,  # 改名
             "安全可放量产能": safe
         })
 
 df_trend = pd.DataFrame(table_data)
 
-# 展示表格（跟单月面板列完全一致）
+# 展示表格
 show_cols = [
     "厂家", "到货年月",
     "近3个月订单数", "近3个月平均产能",
-    "近半年订单数", "近半年平均产能（基准）",
+    "近半年订单数", "近半年平均产能",
     "近一年订单数", "近一年平均产能",
-    "历史最高单月产能", "近半年准时率%", "安全可放量产能"
+    "历史最高单月产能", "近三个月准时率%", "安全可放量产能"
 ]
 
 st.dataframe(
@@ -1812,11 +1803,11 @@ st.dataframe(
         "近3个月订单数": "{:,.0f}",
         "近3个月平均产能": "{:,.0f}",
         "近半年订单数": "{:,.0f}",
-        "近半年平均产能（基准）": "{:,.0f}",
+        "近半年平均产能": "{:,.0f}",
         "近一年订单数": "{:,.0f}",
         "近一年平均产能": "{:,.0f}",
         "历史最高单月产能": "{:,.0f}",
-        "近半年准时率%": "{:.1f}%",
+        "近三个月准时率%": "{:.1f}%",
         "安全可放量产能": "{:,.0f}"
     }),
     use_container_width=True,
@@ -1828,7 +1819,8 @@ st.dataframe(
 st.markdown("---")
 st.subheader("🏭 各厂家安全产能月度变化（趋势+稳定性）")
 
-# ====================== 趋势判断函数（不变） ======================
+
+# 趋势判断函数
 def get_trend_label(df_fac):
     values = df_fac["安全可放量产能"].values
     n = len(values)
@@ -1862,7 +1854,8 @@ def get_trend_label(df_fac):
     else:
         return "小幅波动", "📊", "#3b82f6", f"正常波动 | 系数{cv:.1%}"
 
-# ====================== 卡片展示（已修改：中文日期+显示数值） ======================
+
+# 卡片展示
 factories = df_trend["厂家"].unique()
 cols = st.columns(3)
 
@@ -1882,37 +1875,34 @@ for i, fac in enumerate(factories):
             最新安全可放量产能：<b>{latest_val:,.0f} 件</b><br>
             <span style="color:{color}; font-weight:bold;">{icon} {label}</span><br>
             <small>{desc}</small><br>
-            <small>近半年准时率：{latest['近半年准时率%']:.1f}% &nbsp;|&nbsp; 近半年订单数：{latest['近半年订单数']} 单</small>
+            <small>近3个月准时率：{latest['近三个月准时率%']:.1f}% &nbsp;|&nbsp; 近3个月订单数：{latest['近3个月订单数']} 单</small>
         </div>
         """, unsafe_allow_html=True)
 
-        # 处理日期为中文格式（如：26年3月）
+        # 中文日期折线图
         df_line = df_fac[["到货年月", "安全可放量产能"]].copy()
-        # 把 "2026-03" 转成 "26年3月"
         df_line["中文月份"] = pd.to_datetime(df_line["到货年月"]).dt.strftime("%y年%#m月")
 
-        # 生成折线图
         fig = px.line(
             df_line,
             x="中文月份",
             y="安全可放量产能",
             color_discrete_sequence=["#3b82f6"],
             markers=True,
-            text="安全可放量产能",  # 每个点显示数值
+            text="安全可放量产能",
             height=120
         )
 
-        # 美化图表：调整标签位置、隐藏多余元素
         fig.update_traces(
-            textposition="top center",  # 数值标签在点上方居中
-            textfont=dict(size=10, color="#333")  # 数值字体大小
+            textposition="top center",
+            textfont=dict(size=10, color="#333")
         )
 
         fig.update_layout(
-            margin=dict(l=0, r=0, t=20, b=0),  # 顶部留一点空间给数值标签
+            margin=dict(l=0, r=0, t=20, b=0),
             xaxis_title=None,
             yaxis_title=None,
-            xaxis=dict(showticklabels=True, tickfont=dict(size=10)),  # 显示中文月份
+            xaxis=dict(showticklabels=True, tickfont=dict(size=10)),
             yaxis=dict(showticklabels=False),
             paper_bgcolor="rgba(0,0,0,0)",
             plot_bgcolor="rgba(0,0,0,0)"
