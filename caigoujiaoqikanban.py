@@ -1154,11 +1154,12 @@ st.info("""
 履约等级文字颜色：🟢绿色=优质｜🟡黄色=合格｜🔴红色=异常高危
 """)
 # -------------------------- 定制字段格式 · 紧凑三列决策卡片 --------------------------
+# -------------------------- 定制字段格式 · 紧凑三列决策卡片 --------------------------
 st.markdown("---")
 st.subheader("💡 各品类采购下单建议")
 
-# ===================== 一行两列：到货月份多选 + 风险筛选 =====================
-col_month, col_risk = st.columns(2)
+# ===================== 一行三列：到货月份多选 + 风险筛选 + 下单类型筛选 =====================
+col_month, col_risk, col_order = st.columns(3)  # 这里改成 3 列
 
 # 1. 到货年月筛选器：默认最新月份，支持多选
 with col_month:
@@ -1175,6 +1176,11 @@ with col_risk:
     filter_options = ["全部显示", "仅显示【暂无优质供方】", "仅显示【单一供应风险】"]
     selected_filter = st.selectbox("⚠️ 筛选风险品类", filter_options)
 
+# 3. 新增：下单类型筛选（优先/适量/严控）
+with col_order:
+    order_options = ["全部", "优先下单", "适量下单", "严控订单"]
+    selected_order_type = st.selectbox("✅ 筛选下单类型", order_options)
+
 # ===================== 根据多选月份合并数据 =====================
 df_filtered_by_month = df[df["到货年月"].isin(selected_months)].copy()
 
@@ -1182,7 +1188,7 @@ df_filtered_by_month = df[df["到货年月"].isin(selected_months)].copy()
 df_valid_multi = df_filtered_by_month[
     df_filtered_by_month["厂家"].notna() &
     df_filtered_by_month["采购单号"].notna()
-].copy()
+    ].copy()
 
 compare_df = df_valid_multi.groupby(["产品分类", "厂家"]).agg(
     订单数=("采购单号", "count"),
@@ -1194,8 +1200,9 @@ compare_df = df_valid_multi.groupby(["产品分类", "厂家"]).agg(
 
 # 准时率
 compare_df["准时率%"] = (
-    compare_df["准时数"] / compare_df["订单数"] * 100
+        compare_df["准时数"] / compare_df["订单数"] * 100
 ).fillna(0).round(1)
+
 
 # 等级
 def level(rate):
@@ -1205,6 +1212,8 @@ def level(rate):
         return "🟡 合格"
     else:
         return "🔴 异常"
+
+
 compare_df["等级"] = compare_df["准时率%"].apply(level)
 
 # 分类总采购量（用于排序）
@@ -1232,6 +1241,11 @@ cate_list = list(summary_group)
 filtered_cate_list = []
 for cate, group_data in cate_list:
     good_df = group_data[group_data["等级"] == "🟢 优质"]
+    if not good_df.empty:
+        has_good_supplier = True
+    else:
+        has_good_supplier = False
+
     has_no_good = good_df.empty
     has_single = (group_data["厂家数"].iloc[0] == 1)
 
@@ -1248,9 +1262,9 @@ for cate, group_data in cate_list:
 df_on_sale = df_product_info[df_product_info["是否在售"] == "是"].copy()
 prod_count_map = df_on_sale.groupby("产品类型（新）").size().to_dict()
 
-# ===================== 3列卡片展示 =====================
+# ===================== 3列卡片展示（支持下单类型筛选） =====================
 for i in range(0, len(filtered_cate_list), 3):
-    batch = filtered_cate_list[i:i+3]
+    batch = filtered_cate_list[i:i + 3]
     cols = st.columns(3)
 
     for idx, (cate, group_data) in enumerate(batch):
@@ -1259,24 +1273,41 @@ for i in range(0, len(filtered_cate_list), 3):
                 prod_num = prod_count_map.get(cate, 0)
                 st.markdown(f"**📦 {cate}（在售产品：{prod_num} 款）**")
 
+                # -------------------------- 下单类型筛选逻辑 --------------------------
+                show_good = False
+                show_normal = False
+                show_bad = False
+
+                if selected_order_type == "全部":
+                    show_good = show_normal = show_bad = True
+                elif selected_order_type == "优先下单":
+                    show_good = True
+                elif selected_order_type == "适量下单":
+                    show_normal = True
+                elif selected_order_type == "严控订单":
+                    show_bad = True
+
+                # 优质厂家 = 优先下单
                 good_df = group_data[group_data["等级"] == "🟢 优质"]
-                if not good_df.empty:
+                if not good_df.empty and show_good:
                     st.success("✅ 优先下单")
                     for _, r in good_df.iterrows():
                         st.caption(
                             f"{r['厂家']}｜{int(r['订单数'])}单｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                         )
 
+                # 合格厂家 = 适量下单
                 normal_df = group_data[group_data["等级"] == "🟡 合格"]
-                if not normal_df.empty:
+                if not normal_df.empty and show_normal:
                     st.warning("⚠️ 适量下单")
                     for _, r in normal_df.iterrows():
                         st.caption(
                             f"{r['厂家']}｜{int(r['订单数'])}单｜准时{int(r['准时数'])}｜逾期{int(r['逾期数'])}｜{r['准时率%']}%"
                         )
 
+                # 异常厂家 = 严控订单
                 bad_df = group_data[group_data["等级"] == "🔴 异常"]
-                if not bad_df.empty:
+                if not bad_df.empty and show_bad:
                     st.error("🔴 严控订单")
                     for _, r in bad_df.iterrows():
                         st.caption(
