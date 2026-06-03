@@ -730,10 +730,16 @@ else:
     # 3. 开始生成卡片（3列布局）
     st.markdown("#### 📌 各厂家全品类明细卡片")
 
-    # ==========新增：提前统计各厂家加急单数==========
+    # ========== 1. 统计加急单 ==========
     urgent_df = df[df["是否加急"] == "是"].groupby("厂家").size().reset_index(name="加急单数")
-    # 转字典方便快速取值，没有加急的厂家默认0
     urgent_dict = dict(urgent_df.values)
+
+    # ========== 2. 预处理：特殊原因隐藏的单据（是否加入看板=否 + 有异常原因） ==========
+    df_hide_abnormal = df[(df["是否加入看板"] == "否") & (df["是否有异常原因"] == "是")].copy()
+    show_cols = ["厂家", "异常原因", "MSKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
+    hide_abnormal_dict = {}
+    for fac_name, sub_df in df_hide_abnormal.groupby("厂家"):
+        hide_abnormal_dict[fac_name] = sub_df[show_cols].reset_index(drop=True)
 
     factory_list = factory_total["厂家"].unique()
     cols = st.columns(3)
@@ -744,13 +750,13 @@ else:
         total_order = f_data["总订单"]
         factory_rate = f_data["整体准时率%"]
 
-        # ==========新增：读取当前厂家加急数量==========
+        # 读取加急数量
         urgent_cnt = urgent_dict.get(factory_name, 0)
 
         # 该厂家所有品类
         cats = category_stats[category_stats["厂家"] == factory_name]
 
-        # 整体评级配色不变
+        # 整体评级配色
         if factory_rate >= 90:
             bg_color = "#f0fdf4"
             border = "#4ade80"
@@ -764,7 +770,7 @@ else:
             border = "#f87171"
             level = "❌ 整体需整改"
 
-        # 品类明细上色逻辑不变
+        # 品类明细上色
         cat_lines = []
         for _, row in cats.iterrows():
             c_name = row["产品分类"]
@@ -785,11 +791,10 @@ else:
 
         cat_html = "<br>".join(cat_lines)
 
-        # ==========修改卡片头部HTML：flex左右布局，右上角加急单==========
+        # 卡片 + 折叠面板渲染
         with cols[idx % 3]:
             st.markdown(f"""
             <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border}; margin-bottom:15px;">
-                <!-- 标题行：左厂家名 + 右加急单 -->
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:17px; font-weight:bold; margin-bottom:8px;">
                     <span>🏭 {factory_name}</span>
                     <span style="font-size:13px; color:#d92525; background:#ffe9e9; padding:3px 8px; border-radius:6px;">加急单：{urgent_cnt}单</span>
@@ -804,6 +809,15 @@ else:
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+            # ========== 3. 新增：折叠面板 - 特殊原因隐藏单据 ==========
+            df_ab = hide_abnormal_dict.get(factory_name, pd.DataFrame())
+            ab_cnt = len(df_ab)
+            with st.expander(f"📄 因特殊原因隐藏单据（{ab_cnt}条）"):
+                if ab_cnt > 0:
+                    st.dataframe(df_ab, use_container_width=True, hide_index=True)
+                else:
+                    st.info("本厂家无特殊原因隐藏单据")
 
     # 底部说明
     st.markdown("---")
