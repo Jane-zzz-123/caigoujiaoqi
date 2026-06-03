@@ -729,6 +729,12 @@ else:
 
     # 3. 开始生成卡片（3列布局）
     st.markdown("#### 📌 各厂家全品类明细卡片")
+
+    # ==========新增：提前统计各厂家加急单数==========
+    urgent_df = df[df["是否加急"] == "是"].groupby("厂家").size().reset_index(name="加急单数")
+    # 转字典方便快速取值，没有加急的厂家默认0
+    urgent_dict = dict(urgent_df.values)
+
     factory_list = factory_total["厂家"].unique()
     cols = st.columns(3)
 
@@ -738,10 +744,13 @@ else:
         total_order = f_data["总订单"]
         factory_rate = f_data["整体准时率%"]
 
+        # ==========新增：读取当前厂家加急数量==========
+        urgent_cnt = urgent_dict.get(factory_name, 0)
+
         # 该厂家所有品类
         cats = category_stats[category_stats["厂家"] == factory_name]
 
-        # 整体评级
+        # 整体评级配色不变
         if factory_rate >= 90:
             bg_color = "#f0fdf4"
             border = "#4ade80"
@@ -755,7 +764,7 @@ else:
             border = "#f87171"
             level = "❌ 整体需整改"
 
-        # 品类明细（自动上色 + 显示全部字段）
+        # 品类明细上色逻辑不变
         cat_lines = []
         for _, row in cats.iterrows():
             c_name = row["产品分类"]
@@ -763,29 +772,28 @@ else:
             c_on = row["准时数"]
             c_over = row["逾期数"]
             c_rate = row["准时率%"]
-            c_avg = round(row["平均交期"],1)
-            c_max = round(row["最长交期"],1)
+            c_avg = round(row["平均交期"], 1)
+            c_max = round(row["最长交期"], 1)
 
-            # 按你要求自动上色
             if c_rate >= 90:
-                # 优质 → 绿色
                 line = f"✅ <span style='color:#16a34a; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
             elif c_rate >= 80:
-                # 合格 → 橙色
                 line = f"🔸 <span style='color:#f97316; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
             else:
-                # 短板 → 红色
                 line = f"🔻 <span style='color:#dc2626; font-weight:bold'>{c_name}</span>：{c_num}单｜准时{c_on}｜逾期{c_over}｜{c_rate}%｜平均交期{c_avg}天｜最长交期{c_max}天"
-
             cat_lines.append(line)
 
         cat_html = "<br>".join(cat_lines)
 
-        # 输出卡片
+        # ==========修改卡片头部HTML：flex左右布局，右上角加急单==========
         with cols[idx % 3]:
             st.markdown(f"""
             <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border}; margin-bottom:15px;">
-                <div style="font-size:17px; font-weight:bold; margin-bottom:8px;">🏭 {factory_name}</div>
+                <!-- 标题行：左厂家名 + 右加急单 -->
+                <div style="display:flex; justify-content:space-between; align-items:center; font-size:17px; font-weight:bold; margin-bottom:8px;">
+                    <span>🏭 {factory_name}</span>
+                    <span style="font-size:13px; color:#d92525; background:#ffe9e9; padding:3px 8px; border-radius:6px;">加急单：{urgent_cnt}单</span>
+                </div>
                 <div style="font-size:14px; line-height:1.8;">
                     总订单：{total_order} 单<br>
                     整体准时率：<b>{factory_rate}%</b><br>
