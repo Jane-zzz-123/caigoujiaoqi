@@ -817,11 +817,11 @@ else:
             # ========== 3. 新增：折叠面板 - 特殊原因隐藏单据 ==========
             df_ab = hide_abnormal_dict.get(factory_name, pd.DataFrame())
             ab_cnt = len(df_ab)
-            with st.expander(f"📄 因特殊原因隐藏单据（{ab_cnt}条）"):
+            with st.expander(f"📄 因特殊原因剔除单据（{ab_cnt}条）"):
                 if ab_cnt > 0:
                     st.dataframe(df_ab, use_container_width=True, hide_index=True)
                 else:
-                    st.info("本厂家无特殊原因隐藏单据")
+                    st.info("本厂家无特殊原因剔除单据")
 
     # 底部说明
     st.markdown("---")
