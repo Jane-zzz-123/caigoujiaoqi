@@ -740,7 +740,7 @@ else:
 
     # ========== 2. 预处理：特殊原因隐藏的单据（是否加入看板=否 + 有异常原因） ==========
     df_hide_abnormal = df_hidden_abnormal.copy()
-    show_cols = ["厂家", "异常原因", "MSKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
+    show_cols = ["厂家", "异常原因", "SKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
     hide_abnormal_dict = {}
     for fac_name, sub_df in df_hide_abnormal.groupby("厂家"):
         hide_abnormal_dict[fac_name] = sub_df[show_cols].reset_index(drop=True)
