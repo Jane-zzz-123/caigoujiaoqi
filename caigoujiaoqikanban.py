@@ -21,34 +21,38 @@ def load_data():
         response.raise_for_status()
         excel_file = BytesIO(response.content)
 
-        # 一次性读取所有sheet
         all_sheets = pd.read_excel(excel_file, sheet_name=None)
-
-        # 读取两个表
         df = all_sheets["源数据"]
-        df_product = all_sheets["产品分类"]  # 产品表
+        df_product = all_sheets["产品分类"]
 
-        # 清洗主表
         need_cols = [
             "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
             "到货年月", "采购交期", "预计到货时间修改", "异常原因", "厂家",
             "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值","是否有异常原因","是否加急"
         ]
         df = df[need_cols]
+
+        # ===================== 【新增：只提取你要的异常数据，全新名字】 =====================
+        df_hidden_abnormal = df[
+            (df["是否加入看板"] == "否") &
+            (df["是否有异常原因"] == "是")
+        ].copy()
+
+        # ===================== 你原来的代码 完全不动 =====================
         df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
         df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
         df["实际采购交期"] = pd.to_numeric(df["实际采购交期"], errors="coerce")
         df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
 
-        # 🔥 关键：同时返回 主表df + 产品表df_product
-        return df, df_product
+        # 返回：原来的2个 + 新增的1个（完全不影响你旧代码）
+        return df, df_product, df_hidden_abnormal
 
     except Exception as e:
         st.error(f"数据加载失败：{str(e)}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 # 🔥 关键：同时接收两个表
-df, df_product_info = load_data()
+df, df_product_info, df_hidden_abnormal = load_data()
 
 if df.empty:
     st.stop()
@@ -735,7 +739,7 @@ else:
     urgent_dict = dict(urgent_df.values)
 
     # ========== 2. 预处理：特殊原因隐藏的单据（是否加入看板=否 + 有异常原因） ==========
-    df_hide_abnormal = df[(df["是否加入看板"] == "否") & (df["是否有异常原因"] == "是")].copy()
+    df_hide_abnormal = df_hidden_abnormal.copy()
     show_cols = ["厂家", "异常原因", "MSKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
     hide_abnormal_dict = {}
     for fac_name, sub_df in df_hide_abnormal.groupby("厂家"):
