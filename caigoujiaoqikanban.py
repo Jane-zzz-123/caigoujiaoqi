@@ -799,8 +799,9 @@ else:
         with cols[idx % 3]:
             st.markdown(f"""
             <div style="padding:16px; border-radius:12px; background:{bg_color}; border:2px solid {border}; margin-bottom:15px;">
+                <!-- flex：左=年月+厂家，右=加急标签，红框位置放筛选年月 -->
                 <div style="display:flex; justify-content:space-between; align-items:center; font-size:17px; font-weight:bold; margin-bottom:8px;">
-                    <span>🏭 {factory_name}</span>
+                    <span>📅{selected_month}｜🏭 {factory_name}</span>
                     <span style="font-size:13px; color:#d92525; background:#ffe9e9; padding:3px 8px; border-radius:6px;">加急单：{urgent_cnt}单</span>
                 </div>
                 <div style="font-size:14px; line-height:1.8;">
