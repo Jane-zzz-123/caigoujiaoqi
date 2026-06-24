@@ -735,11 +735,13 @@ else:
     st.markdown("#### 📌 各厂家全品类明细卡片")
 
     # ========== 1. 统计加急单 ==========
-    urgent_df = df[df["是否加急"] == "是"].groupby("厂家").size().reset_index(name="加急单数")
+    # ========== 1. 统计加急单（改用筛选后的数据df_current） ==========
+    urgent_df = df_current[df_current["是否加急"] == "是"].groupby("厂家").size().reset_index(name="加急单数")
     urgent_dict = dict(urgent_df.values)
 
     # ========== 2. 预处理：特殊原因隐藏的单据（是否加入看板=否 + 有异常原因） ==========
-    df_hide_abnormal = df_hidden_abnormal.copy()
+    # 完整双筛选（年月 + 选中厂家）
+    df_hide_abnormal = df_hidden_abnormal[df_hidden_abnormal["到货年月"] == selected_month].copy()
     show_cols = ["厂家", "异常原因", "SKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
     hide_abnormal_dict = {}
     for fac_name, sub_df in df_hide_abnormal.groupby("厂家"):
