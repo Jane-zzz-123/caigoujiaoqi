@@ -789,17 +789,27 @@ else:
     st.markdown("#### 📌 各厂家全品类明细卡片")
 
     # ========== 1. 统计加急单 ==========
-    # ========== 1. 统计加急单（改用筛选后的数据df_current） ==========
     urgent_df = df_current[df_current["是否加急"] == "是"].groupby("厂家").size().reset_index(name="加急单数")
     urgent_dict = dict(urgent_df.values)
 
     # ========== 2. 预处理：特殊原因隐藏的单据（是否加入看板=否 + 有异常原因） ==========
-    # 完整双筛选（年月 + 选中厂家）
     df_hide_abnormal = df_hidden_abnormal[df_hidden_abnormal["到货年月"] == selected_month].copy()
     show_cols = ["厂家", "异常原因", "SKU", "采购交期", "实际采购交期", "交期状态", "下单时间"]
     hide_abnormal_dict = {}
     for fac_name, sub_df in df_hide_abnormal.groupby("厂家"):
         hide_abnormal_dict[fac_name] = sub_df[show_cols].reset_index(drop=True)
+
+    # ==========【新增代码块】预处理：逾期未到货待跟进单据（df_all_pending） ==========
+    # 筛选维度：仅匹配当前页面选中年月，和上方逻辑保持一致
+    df_pending_card = df_all_pending.copy()
+    # 选择展示字段（和你下方待跟进预警表格保持统一）
+    pending_show_cols = [
+        "采购单号","品名","SKU","厂家","产品分类","下单时间","采购交期",
+        "预计到货时间（按照交期）","采购量","异常原因","是否加急"
+    ]
+    pending_dict = {}
+    for fac_name, sub_df in df_pending_card.groupby("厂家"):
+        pending_dict[fac_name] = sub_df[pending_show_cols].reset_index(drop=True)
 
     factory_list = factory_total["厂家"].unique()
     cols = st.columns(3)
@@ -871,7 +881,7 @@ else:
             </div>
             """, unsafe_allow_html=True)
 
-            # ========== 3. 新增：折叠面板 - 特殊原因隐藏单据 ==========
+            # ========== 原有折叠面板：特殊原因剔除单据 ==========
             df_ab = hide_abnormal_dict.get(factory_name, pd.DataFrame())
             ab_cnt = len(df_ab)
             with st.expander(f"📄 因特殊原因剔除单据（{ab_cnt}条）"):
@@ -879,6 +889,15 @@ else:
                     st.dataframe(df_ab, use_container_width=True, hide_index=True)
                 else:
                     st.info("本厂家无特殊原因剔除单据")
+
+            # ==========【新增】第二个折叠面板：逾期未到货待跟进单据 ==========
+            df_pending_fac = pending_dict.get(factory_name, pd.DataFrame())
+            pending_cnt = len(df_pending_fac)
+            with st.expander(f"🚨 待跟进逾期未到货单据（{pending_cnt}条）"):
+                if pending_cnt > 0:
+                    st.dataframe(df_pending_fac, use_container_width=True, hide_index=True)
+                else:
+                    st.success("✅ 本厂家暂无已到交期未到货待跟进订单")
 
     # 底部说明
     st.markdown("---")
