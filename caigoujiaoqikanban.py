@@ -28,7 +28,8 @@ def load_data():
         need_cols = [
             "是否加入看板", "采购单号", "下单时间", "品名", "SKU", "采购量", "到货量",
             "到货年月", "采购交期", "预计到货时间修改", "异常原因", "厂家",
-            "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值","是否有异常原因","是否加急"
+            "厂家类目明细", "产品分类", "实际采购交期", "交期状态", "预计-实际交期的差值","是否有异常原因","是否加急",
+            "是否已到交期但未到货","预计到货时间（按照交期）"
         ]
         df = df[need_cols]
 
@@ -37,7 +38,8 @@ def load_data():
             (df["是否加入看板"] == "否") &
             (df["是否有异常原因"] == "是")
         ].copy()
-
+        # ========== 新增：提取所有已到交期但未到货的订单（全量，不分年月） ==========
+        df_all_pending = df[df["是否已到交期但未到货"] == "是"].copy()
         # ===================== 你原来的代码 完全不动 =====================
         df = df[df["是否加入看板"] == "是"].reset_index(drop=True)
         df["到货年月"] = pd.to_datetime(df["到货年月"], errors="coerce").dt.to_period("M").astype(str)
@@ -45,14 +47,14 @@ def load_data():
         df["预计-实际交期的差值"] = pd.to_numeric(df["预计-实际交期的差值"], errors="coerce")
 
         # 返回：原来的2个 + 新增的1个（完全不影响你旧代码）
-        return df, df_product, df_hidden_abnormal
+        return df, df_product, df_hidden_abnormal, df_all_pending
 
     except Exception as e:
         st.error(f"数据加载失败：{str(e)}")
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 # 🔥 关键：同时接收两个表
-df, df_product_info, df_hidden_abnormal = load_data()
+df, df_product_info, df_hidden_abnormal, df_all_pending = load_data()
 
 if df.empty:
     st.stop()
@@ -71,6 +73,22 @@ with col2:
 df_current = df[df["到货年月"] == selected_month].copy()
 if selected_factory:
     df_current = df_current[df_current["厂家"].isin(selected_factory)]
+
+# ========== 新增：同步筛选待跟进订单（仅过滤厂家，不使用到货年月、不计算逾期天数） ==========
+df_pending_overdue = df_all_pending.copy()
+# 厂家筛选同步页面上方多选框
+if selected_factory:
+    df_pending_overdue = df_pending_overdue[df_pending_overdue["厂家"].isin(selected_factory)]
+
+# 核心：按【预计到货时间（按照交期）】升序，最早到期放最上面
+df_pending_overdue["预计到货时间（按照交期）"] = pd.to_datetime(
+    df_pending_overdue["预计到货时间（按照交期）"],
+    errors="coerce"
+)
+df_pending_overdue = df_pending_overdue.sort_values(
+    "预计到货时间（按照交期）",
+    ascending=True
+).reset_index(drop=True)
 
 # -------------------------- 上月数据 --------------------------
 def get_last_month(ym):
@@ -327,7 +345,6 @@ table_cols = [
     "产品分类", "采购交期", "实际采购交期", "预计-实际交期的差值"
 ]
 df_table = df_current.copy()
-
 # ====================== 【加这一行！】解决重复列报错 ======================
 df_table = df_table.loc[:, ~df_table.columns.duplicated()]
 
@@ -336,6 +353,43 @@ df_table = df_table.sort_values(["排序标识", "采购量"], ascending=[True, 
 st.dataframe(df_table[table_cols], use_container_width=True, height=300)
 
 st.markdown("---")
+
+# ===================== 新增：已到交期未到货待跟进预警表 =====================
+st.markdown("---")
+# 红色警示标题区分两套口径
+st.subheader("🚨 待跟进预警：已到交期但未入库到货订单（不纳入月度准时率考核）")
+# 口径说明，防止老板混淆数据
+st.info("""
+【口径区分说明】
+上方「交期数据明细」：仅统计**已入库、存在到货年月**订单，用于月度供应商履约、准时率、产能核算；
+下表：已到采购交期、无入库记录、待采购持续跟进的在途订单，仅作为跟单风险清单，不参与任何月度经营指标计算。
+排序规则：按预计到货时间（按照交期）由早到晚，优先跟进更早到期订单。
+""")
+
+# 统计卡片展示待跟进总量
+pending_total = len(df_pending_overdue)
+if pending_total > 0:
+    st.markdown(f"""
+    <div style="background:#fee2e2; border:1px solid #fecaca; border-radius:10px; padding:12px;">
+    <b>当前筛选条件下待跟进订单总数：{pending_total} 单</b>
+    </div>
+    """, unsafe_allow_html=True)
+else:
+    st.success("✅ 当前筛选条件下无已到交期未到货待跟进订单")
+
+# 定义待跟进表格展示字段【移除当前逾期天数，保留是否加急列展示，但不单独统计】
+pending_cols = [
+    "采购单号","品名","SKU","厂家","产品分类","下单时间","采购交期",
+    "预计到货时间（按照交期）","采购量","异常原因","是否加急"
+]
+df_pending_show = df_pending_overdue[pending_cols].copy()
+
+# 直接原生展示表格，移除所有样式高亮逻辑
+st.dataframe(df_pending_show, use_container_width=True, height=350)
+st.markdown("---")
+# ==========================================================================
+
+
 
 # -------------------------- 逾期深度分析（严格按你指定区间） --------------------------
 st.markdown("---")
